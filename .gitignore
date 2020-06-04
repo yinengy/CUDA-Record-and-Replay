@@ -4,3 +4,8 @@
 *.ptx
 *.cubin
 *.fatbin
+*.o
+*.so
+
+test-apps/*
+nvbit_release/*
