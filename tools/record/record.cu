@@ -163,10 +163,6 @@ void save_nonpointer_arguments(void **kernelParams,std::string func_sig) {
                    type == "unsignedlonglongint") {
             // unsigned long long
             file << ((unsigned long long **) kernelParams)[i][0]; 
-        } else if (type == "unsignedlonglong" ||
-                   type == "unsignedlonglongint") {
-            // unsigned long long
-            file << ((unsigned long long **) kernelParams)[i][0]; 
         } else if (type == "float") {
             // float
             file << ((float **) kernelParams)[i][0]; 
@@ -197,11 +193,11 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
      */
     if ((cbid == API_CUDA_cuMemcpyDtoH_v2) && is_exit)  {
         /* get parameters */
-        cuMemcpyDtoH_params *p = (cuMemcpyDtoH_params *)params;
+        cuMemcpyDtoH_v2_params *p = (cuMemcpyDtoH_v2_params *)params;
 
         dump_mem(p->dstHost, p->ByteCount, 0);
     } else if ((cbid == API_CUDA_cuMemcpyHtoD_v2) && is_exit)  {
-        cuMemcpyHtoD_params *p = (cuMemcpyHtoD_params *)params;
+        cuMemcpyHtoD_v2_params *p = (cuMemcpyHtoD_v2_params *)params;
 
         dump_mem(p->srcHost, p->ByteCount, 1);
     } else if ((cbid == API_CUDA_cuLaunchKernel_ptsz ||
