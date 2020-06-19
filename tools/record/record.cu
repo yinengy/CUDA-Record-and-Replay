@@ -44,17 +44,16 @@ void dump_mem(const void *src, size_t ByteCount, int is_input) {
         sprintf(filename, "kernel_log/omem%d.bin", cudaMemcpy_output_count);
     }
     
-    FILE *fp = fopen(filename, "wb");
+    std::ofstream file(filename, std::ios::out | std::ios::binary);
 
-    if (!fp) {
+    if (!file.is_open()) {
         std::cerr << strerror(errno) << "failed to open file.\n";
         exit(1);
     }
 
-    if (fwrite(src, ByteCount, 1, fp) != 1) {
-        std::cerr << strerror(errno) << "failed to write file.\n";
-        exit(1);
-    }
+    file.write((char *) src, ByteCount);
+
+    file.close();
 }
 
 

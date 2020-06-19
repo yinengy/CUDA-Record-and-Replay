@@ -49,19 +49,23 @@ void *get_recorded_mem(size_t ByteCount, int is_input) {
         sprintf(filename, "kernel_log/omem%d.bin", cudaMemcpy_output_count);
     }
     
-    FILE *fp = fopen(filename, "rb");
+    void *buffer = malloc(ByteCount);
 
-    if (!fp) {
+    std::ifstream file(filename, std::ios::in | std::ios::binary);
+        
+    if (!file.is_open()) {
         std::cerr << strerror(errno) << "failed to open file.\n";
         exit(1);
     }
 
-    void *buffer = malloc(ByteCount);
+    file.read((char *) buffer, ByteCount);
 
-    if (fread(buffer, ByteCount, 1, fp) != 1) {
-        std::cerr << strerror(errno) << "failed to read file.\n";
+    if (!file) {
+        std::cerr << "only " << file.gcount() << " could be read from " << filename << std::endl;
         exit(1);
     }
+
+    file.close();
 
     return buffer;
 }
@@ -73,7 +77,7 @@ void compare_mem(const void *ptr, size_t ByteCount) {
     int is_equal = memcmp(ptr, to_compare, ByteCount);
 
     if (is_equal != 0) {
-        std::cout << cudaMemcpy_output_count << "th output doesn't match\n!";
+        std::cerr << cudaMemcpy_output_count << "th output doesn't match!\n";
     }
 
     free(to_compare);
