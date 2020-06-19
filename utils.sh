@@ -54,6 +54,18 @@ case $1 in
     LD_PRELOAD=$tool_dir/$1/$1.so ./$app_dir/$2/run | scripts/race_check_helper.py
     ;;
 
+  "rr")
+    for i in {1..20}
+    do
+      LD_PRELOAD=$tool_dir/record/record.so ./$app_dir/$2/run > /dev/null
+      ERROR=$(LD_PRELOAD=$tool_dir/replay/replay.so ./$app_dir/$2/run 2>&1 > /dev/null)
+      if [[ ! -z "$ERROR" ]]; then
+        echo "Output doesn't match in $i th run"
+      fi
+    done
+    echo "Finish"
+    ;;
+
   *)
     make --directory $tool_dir/$1
 
