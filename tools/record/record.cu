@@ -19,6 +19,11 @@
 #include <sys/stat.h>
 #include <assert.h>
 #include <unordered_set>
+#include <stdint.h>
+
+/* serialize vector */
+#include <cereal/archives/binary.hpp>
+#include <cereal/types/vector.hpp>
 
 /* header for every nvbit tool */
 #include "nvbit_tool.h"
@@ -56,6 +61,9 @@ std::unordered_set<CUfunction> already_instrumented;
 int cudaMemcpy_input_count = 0;
 int cudaMemcpy_output_count = 0;
 int funcParams_count = 0;
+
+/* 3D vector of [block_id, thread_id, num_access] to value of memory accesses */
+std::vector<std::vector<std::vector<uint32_t>>> mem_val;
 
 /* will save memory to files 
  * if is_input is 0, it means the mem is copied from device to host
@@ -242,8 +250,9 @@ void *recv_thread_fun(void *) {
                     break;
                 }
 
-                printf("%d,%d,%d\n", ma->block_id,
-                       ma->l_thread_id, ma->val);
+                /* save memory value to vector */    
+                mem_val[ma->block_id][ma->l_thread_id].push_back(ma->val);
+
                 num_processed_bytes += sizeof(mem_access_t);
             }
         }
@@ -353,6 +362,12 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
 
             nvbit_enable_instrumented(ctx, p->f, true);
 
+            /* reserve space */
+            int num_block = p->gridDimX * p->gridDimY * p->gridDimZ;
+            int num_thread = p->blockDimX * p->blockDimY * p->blockDimZ;
+            mem_val.empty();
+            mem_val.resize(num_block, std::vector<std::vector<uint32_t>>(num_thread));
+
             recv_thread_receiving = true;
         } else {
             /* make sure current kernel is completed */
@@ -376,6 +391,23 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
              * current kernel */
             while (recv_thread_receiving) {
                 pthread_yield();
+            }
+
+            /* serilize vector */
+            char filename[25];
+            sprintf(filename, "kernel_log/vmem%d.bin", funcParams_count);
+            std::ofstream file;
+            file.open(filename);
+
+            if (file.fail()) {
+                std::cerr << strerror(errno) << "failed to open file.\n";
+                exit(1);
+            }
+
+            {
+                cereal::BinaryOutputArchive oarchive(file);
+
+                oarchive(mem_val);
             }
         }
     }
