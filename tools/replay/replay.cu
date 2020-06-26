@@ -281,8 +281,8 @@ void get_mem_val() {
         /* copy data from vector to array */
         for (size_t x = 0; x < num_block; x++) {
             for (size_t y = 0; y < num_thread; y++) {
-                memcpy(h_mem_val + x * y, (uint32_t *) mem_val_vec[x][y].data(), 
-                        sizeof(uint32_t) * mem_val_vec[x][y].size());
+                memcpy(h_mem_val + x * num_thread * num_access + y * num_access, 
+                        (uint32_t *) mem_val_vec[x][y].data(), sizeof(uint32_t) * mem_val_vec[x][y].size());
             }
         }
     }  // mem_val_vec out of scope here

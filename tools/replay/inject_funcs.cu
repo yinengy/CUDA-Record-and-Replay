@@ -34,9 +34,7 @@ extern "C" __device__ __noinline__ void replace_mem_val(int32_t pred,
                                l_thread_id * num_access + current_counter];
 
     /* increment the counter */
-    counter[block_id * num_thread + num_thread]++;
+    counter[block_id * num_thread + l_thread_id]++;
 
     nvbit_write_reg(reg_num, reg_val);
-
-    printf("%d ", reg_val);
 }

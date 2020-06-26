@@ -39,5 +39,4 @@ extern "C" __device__ __noinline__ void record_mem_val(int32_t pred,
     ChannelDev *channel_dev = (ChannelDev *)pchannel_dev;
     channel_dev->push(&ma, sizeof(mem_access_t));
 
-    printf("%d ", ma.val);
 }
