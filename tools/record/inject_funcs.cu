@@ -19,7 +19,7 @@
 
 extern "C" __device__ __noinline__ void record_mem_val(int32_t pred,
                                                        uint64_t pchannel_dev,
-                                                       uint32_t val) {
+                                                       uint32_t reg_num) {
     if (!pred) {
         return;
     }
@@ -34,8 +34,10 @@ extern "C" __device__ __noinline__ void record_mem_val(int32_t pred,
 
     ma.block_id = block_id;
     ma.l_thread_id = l_thread_id;
-    ma.val = nvbit_read_reg(0);
+    ma.val = nvbit_read_reg(reg_num);
     
     ChannelDev *channel_dev = (ChannelDev *)pchannel_dev;
     channel_dev->push(&ma, sizeof(mem_access_t));
+
+    printf("%d ", ma.val);
 }

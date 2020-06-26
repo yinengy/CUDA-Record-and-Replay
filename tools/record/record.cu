@@ -294,7 +294,7 @@ void instrument_function_if_needed(CUcontext ctx, CUfunction func) {
                     /* first reg is the destination */
                     const Instr::operand_t *dst_reg = instr->getOperand(0);
                     assert(dst_reg->type == Instr::operandType::REG);
-                    reg_idx = 0;
+                    reg_idx = dst_reg->u.reg.num;
 
                     /* after this instruction so dst reg has the value */
                     nvbit_insert_call(instr, "record_mem_val", IPOINT_AFTER);
@@ -305,7 +305,7 @@ void instrument_function_if_needed(CUcontext ctx, CUfunction func) {
                     /* second reg is the source */
                     const Instr::operand_t *src_reg = instr->getOperand(1);
                     assert(src_reg->type == Instr::operandType::REG);
-                    reg_idx = 1;
+                    reg_idx = src_reg->u.reg.num;
 
                     /* before this instruction so src reg is not changed */
                     nvbit_insert_call(instr, "record_mem_val", IPOINT_BEFORE);
