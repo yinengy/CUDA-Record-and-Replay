@@ -15,34 +15,27 @@
 /* contains definition of the mem_access_t structure */
 #include "common.h"
 
-extern "C" __device__ __noinline__ void instrument_mem(int pred, int opcode_id,
-                                                       uint64_t addr,
-                                                       uint64_t pchannel_dev) {
+#include "nvbit_reg_rw.h"
+
+extern "C" __device__ __noinline__ void record_mem_val(int32_t pred,
+                                                       uint64_t pchannel_dev,
+                                                       uint32_t val) {
     if (!pred) {
         return;
     }
 
-    int active_mask = ballot(1);
-    const int laneid = get_laneid();
-    const int first_laneid = __ffs(active_mask) - 1;
+    int block_id = blockIdx.x + blockIdx.y * gridDim.x +
+                   gridDim.x * gridDim.y * blockIdx.z;
+
+    int l_thread_id = (threadIdx.z * (blockDim.x * blockDim.y)) +
+                      (threadIdx.y * blockDim.x) + threadIdx.x;
 
     mem_access_t ma;
 
-    /* collect memory address information from other threads */
-    for (int i = 0; i < 32; i++) {
-        ma.addrs[i] = shfl(addr, i);
-    }
-
-    int4 cta = get_ctaid();
-    ma.cta_id_x = cta.x;
-    ma.cta_id_y = cta.y;
-    ma.cta_id_z = cta.z;
-    ma.warp_id = get_warpid();
-    ma.opcode_id = opcode_id;
-
-    /* first active lane pushes information on the channel */
-    if (first_laneid == laneid) {
-        ChannelDev *channel_dev = (ChannelDev *)pchannel_dev;
-        channel_dev->push(&ma, sizeof(mem_access_t));
-    }
+    ma.block_id = block_id;
+    ma.l_thread_id = l_thread_id;
+    ma.val = nvbit_read_reg(0);
+    
+    ChannelDev *channel_dev = (ChannelDev *)pchannel_dev;
+    channel_dev->push(&ma, sizeof(mem_access_t));
 }

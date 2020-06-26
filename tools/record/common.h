@@ -1,16 +1,7 @@
-/* 
- * Message type used in channel
- *
- * Yineng Yan (yinengy@umich.edu), 2020
- */
-
 #include <stdint.h>
 
 typedef struct {
-    int cta_id_x;
-    int cta_id_y;
-    int cta_id_z;
-    int warp_id;
-    int opcode_id;
-    uint64_t addrs[32];
+    int block_id;
+    int l_thread_id;
+    uint32_t val;
 } mem_access_t;

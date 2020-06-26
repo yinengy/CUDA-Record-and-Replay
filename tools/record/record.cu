@@ -212,10 +212,10 @@ void save_nonpointer_arguments(void **kernelParams,std::string func_sig) {
 }
 
 __global__ void flush_channel() {
-    /* push memory access with negative cta id to communicate the kernel is
+    /* push memory access with negative block id to communicate the kernel is
      * completed */
     mem_access_t ma;
-    ma.cta_id_x = -1;
+    ma.block_id = -1;
     channel_dev.push(&ma, sizeof(mem_access_t));
 
     /* flush channel */
@@ -237,18 +237,13 @@ void *recv_thread_fun(void *) {
 
                 /* when we get this cta_id_x it means the kernel has completed
                  */
-                if (ma->cta_id_x == -1) {
+                if (ma->block_id == -1) {
                     recv_thread_receiving = false;
                     break;
                 }
 
-                printf("CTA %d,%d,%d - warp %d - %s - ", ma->cta_id_x,
-                       ma->cta_id_y, ma->cta_id_z, ma->warp_id,
-                       id_to_opcode_map[ma->opcode_id].c_str());
-                for (int i = 0; i < 32; i++) {
-                    printf("0x%016lx ", ma->addrs[i]);
-                }
-                printf("\n");
+                printf("%d,%d,%d\n", ma->block_id,
+                       ma->l_thread_id, ma->val);
                 num_processed_bytes += sizeof(mem_access_t);
             }
         }
@@ -274,57 +269,51 @@ void instrument_function_if_needed(CUcontext ctx, CUfunction func) {
             continue;
         }
         const std::vector<Instr *> &instrs = nvbit_get_instrs(ctx, f);
-        if (verbose) {
-            printf("Inspecting function %s at address 0x%lx\n",
-                   nvbit_get_func_name(ctx, f), nvbit_get_func_addr(f));
-        }
 
-        uint32_t cnt = 0;
         /* iterate on all the static instructions in the function */
-        for (auto instr : instrs) {
-            if (cnt < instr_begin_interval || cnt >= instr_end_interval) {
-                cnt++;
-                continue;
-            }
-            if (verbose) {
-                instr->printDecoded();
-            }
+        for (auto instr : instrs) {  
+            std::string opcode = instr->getOpcodeShort();
 
-            if (sass_to_id_map.find(instr->getSass()) ==
-                sass_to_id_map.end()) {
-                int opcode_id = sass_to_id_map.size();
-                sass_to_id_map[instr->getSass()] = opcode_id;
-                id_to_sass_map[opcode_id] = std::string(instr->getSass());
-            }
+            /* only instrument store and load instructions */
+            if (instr->isLoad() || instr->isStore()) {
+                int reg_idx = 0;
 
-            int opcode_id = sass_to_id_map[instr->getSass()];
-            std::vector<int> reg_num_list;
-            /* iterate on the operands */
-            for (int i = 0; i < instr->getNumOperands(); i++) {
-                /* get the operand "i" */
-                const Instr::operand_t *op = instr->getOperand(i);
-                if (op->type == Instr::operandType::REG) {
-                    reg_num_list.push_back(op->u.reg.num);
+                if (opcode == "LDG") {  // load
+                    /* it should has two operands */
+                    assert(instr->getNumOperands() == 2);
+
+                    /* first reg is the destination */
+                    const Instr::operand_t *dst_reg = instr->getOperand(0);
+                    assert(dst_reg->type == Instr::operandType::REG);
+                    reg_idx = 0;
+
+                    /* after this instruction so dst reg has the value */
+                    nvbit_insert_call(instr, "record_mem_val", IPOINT_AFTER);
+                } else if (opcode == "STG") {  // store
+                    /* it should has two operands */
+                    assert(instr->getNumOperands() == 2);
+
+                    /* second reg is the source */
+                    const Instr::operand_t *src_reg = instr->getOperand(1);
+                    assert(src_reg->type == Instr::operandType::REG);
+                    reg_idx = 1;
+
+                    /* before this instruction so src reg is not changed */
+                    nvbit_insert_call(instr, "record_mem_val", IPOINT_BEFORE);
+                } else {
+                    // TODO: support more load and store instructions
+                    std::cerr << opcode << ": unhandled instruction.\n";
+                    instr->printDecoded();
+                    exit(1);
                 }
+
+                /* predicate value */
+                nvbit_add_call_arg_pred_val(instr);
+                /* add pointer to channel_dev*/
+                nvbit_add_call_arg_const_val64(instr, (uint64_t)&channel_dev);
+                /* add reg index */
+                nvbit_add_call_arg_const_val32(instr, reg_idx, false);
             }
-            /* insert call to the instrumentation function with its
-             * arguments */
-            nvbit_insert_call(instr, "record_reg_val", IPOINT_BEFORE);
-            /* predicate value */
-            nvbit_add_call_arg_pred_val(instr);
-            /* opcode id */
-            nvbit_add_call_arg_const_val32(instr, opcode_id);
-            /* add pointer to channel_dev*/
-            nvbit_add_call_arg_const_val64(instr,
-                                           (uint64_t)&channel_dev);
-            /* how many register values are passed next */
-            nvbit_add_call_arg_const_val32(instr, reg_num_list.size());
-            for (int num : reg_num_list) {
-                /* last parameter tells it is a variadic parameter passed to
-                 * the instrument function record_reg_val() */
-                nvbit_add_call_arg_reg_val(instr, num, true);
-            }
-            cnt++;
         }
     }
 }
@@ -363,6 +352,8 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
             instrument_function_if_needed(ctx, p->f);
 
             nvbit_enable_instrumented(ctx, p->f, true);
+
+            recv_thread_receiving = true;
         } else {
             /* make sure current kernel is completed */
             cudaDeviceSynchronize();
