@@ -51,16 +51,20 @@ case $1 in
 
     make --directory $app_dir/$2
 
-    LD_PRELOAD=$tool_dir/$1/$1.so ./$app_dir/$2/run | scripts/race_check_helper.py
+    LD_PRELOAD=$tool_dir/$1/$1.so ./$app_dir/$2/run | scripts/race_check_helper.py > datarace.txt
     ;;
 
   "rr")
+    LD_PRELOAD=$tool_dir/race_check_trace/race_check_trace.so ./$app_dir/$2/run | scripts/race_check_helper.py > datarace.txt
+    LD_PRELOAD=$tool_dir/record/record.so ./$app_dir/$2/run > /dev/null
+  
     for i in {1..20}
     do
-      LD_PRELOAD=$tool_dir/record/record.so ./$app_dir/$2/run > /dev/null
       ERROR=$(LD_PRELOAD=$tool_dir/replay/replay.so ./$app_dir/$2/run 2>&1 > /dev/null)
       if [[ ! -z "$ERROR" ]]; then
         echo "Output doesn't match in $i th run"
+      else
+        echo "Finish"
       fi
     done
     echo "Finish"
