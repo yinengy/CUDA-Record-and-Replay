@@ -15,6 +15,7 @@
 #include <cerrno>
 #include <algorithm>
 #include <sys/stat.h>
+#include <map>
 
 /* serialize vector */
 #include <cereal/archives/binary.hpp>
@@ -52,6 +53,39 @@ bool skip_flag = false;
 
 /* Set used to avoid re-instrumenting the same functions multiple times */
 std::unordered_set<CUfunction> already_instrumented;
+
+/* map of func_id to set of inst_id */
+std::map<int, std::unordered_set<int>> data_race_log;
+
+/* counter for func_id */
+int func_counter = 0;
+
+void get_data_race_log() {
+    std::ifstream file;
+    file.open("datarace.txt");
+
+    if (file.fail()) {
+        std::cerr << strerror(errno) << "failed to open file.\n";
+        exit(1);
+    }
+
+    int func_id, inst_id;
+    char comma;
+    std::string line;
+    while (std::getline(file, line)) {
+        /* read type */
+        std::istringstream iss(line);
+        iss >> func_id;
+        iss >> comma;
+        iss >> inst_id;
+
+        if (data_race_log.find(func_id) == data_race_log.end()) {
+            data_race_log[func_id] = std::unordered_set<int>();
+        } 
+        
+        data_race_log[func_id].insert(inst_id);
+    }
+}
 
 /* read memory content recorded in record phase from files 
  * if is_input is 0, it means the mem is copied from device to host
@@ -311,56 +345,75 @@ void instrument_function_if_needed(CUcontext ctx, CUfunction func) {
         }
         const std::vector<Instr *> &instrs = nvbit_get_instrs(ctx, f);
 
+        /* insert function name into the vector*/
+        /* its index is func_id */
+        int func_id = func_counter;
+        func_counter++;
+
+        int inst_id = 0;
+
+        /* check if there is data race in this function */
+        if (data_race_log.find(func_id) == data_race_log.end()) {
+            continue; // no data race, go to next function
+        }
+
+        std::unordered_set<int> data_race_inst = data_race_log[func_id]; 
+
         /* iterate on all the static instructions in the function */
         for (auto instr : instrs) {  
+            /* check if there is data race in this instruction */
+            if (data_race_inst.find(inst_id) == data_race_inst.end()) {
+                inst_id++;
+                continue; // no data race, go to next inst
+            }
+
             std::string opcode = instr->getOpcodeShort();
 
-            /* only instrument store and load instructions */
-            if (instr->isLoad() || instr->isStore()) {
-                int reg_idx = 0;
+            int reg_idx = 0;
 
-                if (opcode == "LDG") {  // load
-                    /* it should has two operands */
-                    assert(instr->getNumOperands() == 2);
+            if (opcode == "LDG") {  // load
+                /* it should has two operands */
+                assert(instr->getNumOperands() == 2);
 
-                    /* first reg is the destination */
-                    const Instr::operand_t *dst_reg = instr->getOperand(0);
-                    assert(dst_reg->type == Instr::operandType::REG);
-                    reg_idx = dst_reg->u.reg.num;
+                /* first reg is the destination */
+                const Instr::operand_t *dst_reg = instr->getOperand(0);
+                assert(dst_reg->type == Instr::operandType::REG);
+                reg_idx = dst_reg->u.reg.num;
 
-                    /* after this instruction so dst reg has the value */
-                    nvbit_insert_call(instr, "replace_mem_val", IPOINT_AFTER);
-                } else if (opcode == "STG") {  // store
-                    /* it should has two operands */
-                    assert(instr->getNumOperands() == 2);
+                /* after this instruction so dst reg has the value */
+                nvbit_insert_call(instr, "replace_mem_val", IPOINT_AFTER);
+            } else if (opcode == "STG") {  // store
+                /* it should has two operands */
+                assert(instr->getNumOperands() == 2);
 
-                    /* second reg is the source */
-                    const Instr::operand_t *src_reg = instr->getOperand(1);
-                    assert(src_reg->type == Instr::operandType::REG);
-                    reg_idx = src_reg->u.reg.num;
+                /* second reg is the source */
+                const Instr::operand_t *src_reg = instr->getOperand(1);
+                assert(src_reg->type == Instr::operandType::REG);
+                reg_idx = src_reg->u.reg.num;
 
-                    /* before this instruction so src reg is not changed */
-                    nvbit_insert_call(instr, "replace_mem_val", IPOINT_BEFORE);
-                } else {
-                    // TODO: support more load and store instructions
-                    std::cerr << opcode << ": unhandled instruction.\n";
-                    instr->printDecoded();
-                    exit(1);
-                }
-
-                /* predicate value */
-                nvbit_add_call_arg_pred_val(instr);
-                /* add mem_val pointer */
-                nvbit_add_call_arg_const_val64(instr, (uint64_t) d_mem_val, false);
-                /* add mem_counter pointer */
-                nvbit_add_call_arg_const_val64(instr, (uint64_t) d_mem_counter, false);
-                /* add num block */
-                nvbit_add_call_arg_const_val32(instr, num_access, false);
-                /* add num thread */
-                nvbit_add_call_arg_const_val32(instr, num_thread, false);
-                /* add reg index */
-                nvbit_add_call_arg_const_val32(instr, reg_idx, false);
+                /* before this instruction so src reg is not changed */
+                nvbit_insert_call(instr, "replace_mem_val", IPOINT_BEFORE);
+            } else {
+                // TODO: support more load and store instructions
+                std::cerr << opcode << ": unhandled instruction.\n";
+                instr->printDecoded();
+                exit(1);
             }
+
+            /* predicate value */
+            nvbit_add_call_arg_pred_val(instr);
+            /* add mem_val pointer */
+            nvbit_add_call_arg_const_val64(instr, (uint64_t) d_mem_val, false);
+            /* add mem_counter pointer */
+            nvbit_add_call_arg_const_val64(instr, (uint64_t) d_mem_counter, false);
+            /* add num block */
+            nvbit_add_call_arg_const_val32(instr, num_access, false);
+            /* add num thread */
+            nvbit_add_call_arg_const_val32(instr, num_thread, false);
+            /* add reg index */
+            nvbit_add_call_arg_const_val32(instr, reg_idx, false);
+            
+            inst_id++;
         }
     }
 }
@@ -415,4 +468,9 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
             skip_flag = false;
         }
     }
+}
+
+void nvbit_at_ctx_init(CUcontext ctx) {
+    /* read data race log */
+    get_data_race_log();
 }
