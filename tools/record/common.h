@@ -3,5 +3,6 @@
 typedef struct {
     int block_id;
     int l_thread_id;
-    uint32_t val;
+    int active_mask;
+    uint32_t vals[32];
 } mem_access_t;

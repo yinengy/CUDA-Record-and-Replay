@@ -284,8 +284,12 @@ void *recv_thread_fun(void *) {
                     break;
                 }
 
-                /* save memory value to vector */    
-                mem_val[ma->block_id][ma->l_thread_id].push_back(ma->val);
+                /* save memory value to vector */
+                for (int i = 0; i < 32; i++) {   
+                    if ((ma->active_mask >> i) & 1) { // if the thread is active
+                        mem_val[ma->block_id][ma->l_thread_id + i].push_back(ma->vals[i]);
+                    }
+                }
 
                 num_processed_bytes += sizeof(mem_access_t);
             }
