@@ -29,7 +29,7 @@
 #include "common.h"
 
 /* contains definition used for checking data race */
-#include "race_checker.h"
+#include "race_checker.hpp"
 
 /* output debug information of not */
 #define DEBUG 0
@@ -46,6 +46,9 @@ int *syn_ops_counter = 0;
 pthread_t recv_thread;
 volatile bool recv_thread_started = false;
 volatile bool recv_thread_receiving = false;
+
+/* race checker */
+Checker race_checker;
 
 /* skip flag used to avoid re-entry on the nvbit_callback when issuing
  * flush_channel kernel call */
@@ -208,8 +211,10 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
             int num_block = p->gridDimX * p->gridDimY * p->gridDimZ;
             CUDA_SAFECALL(cudaMalloc(&syn_ops_counter, num_block * sizeof(int)));
             CUDA_SAFECALL(cudaMemset(syn_ops_counter, 0, num_block * sizeof(int)));
-            
 
+            /* init race checker */
+            race_checker = Checker();
+            
             instrument_function_if_needed(ctx, p->f);
 
             nvbit_enable_instrumented(ctx, p->f, true);
@@ -239,7 +244,7 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
             assert(cudaGetLastError() == cudaSuccess);
 
             /* free allocated cuda memory */
-            cudaFree(syn_ops_counter)
+             CUDA_SAFECALL(cudaFree(syn_ops_counter));
 
             /* make sure we prevent re-entry on the nvbit_callback when issuing
              * the flush_channel kernel */
@@ -285,24 +290,8 @@ void *recv_thread_fun(void *) {
                     break;
                 }
                 
-                /* "#{ld/st}#" is used to grep */
-                // if (ma->is_load) {
-                //     for (int i = 0; i < 32; i++) {
-                //         if (ma->addrs[i] == 0) continue;
-                //         printf("\n#ld#%d,%d,%d,%d,%d,%d,%d,%d,%d,0x%016lx\n",
-                //             ma->is_shared_memory,  ma->cta_id_x,
-                //             ma->cta_id_y, ma->cta_id_z, ma->warp_id, i, ma->func_id, ma->inst_id,
-                //             ma->SFR_id, ma->addrs[i]);
-                //     }
-                // } else {
-                //     for (int i = 0; i < 32; i++) {
-                //         if (ma->addrs[i] == 0) continue;
-                //         printf("\n#st#%d,%d,%d,%d,%d,%d,%d,%d,%d,0x%016lx\n",
-                //             ma->is_shared_memory,  ma->cta_id_x,
-                //             ma->cta_id_y, ma->cta_id_z, ma->warp_id, i, ma->func_id, ma->inst_id,
-                //             ma->SFR_id, ma->addrs[i]);
-                //     }
-                // }
+                race_checker.read(ma);
+                
                 num_processed_bytes += sizeof(mem_access_t);
             }
         }

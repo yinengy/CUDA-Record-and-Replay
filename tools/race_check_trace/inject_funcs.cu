@@ -40,7 +40,7 @@ extern "C" __device__ __noinline__ void instrument_mem(int pred,
 
     int block_id = blockIdx.x + blockIdx.y * gridDim.x +
                    gridDim.x * gridDim.y * blockIdx.z;
-    ma.block_id = block_id
+    ma.block_id = block_id;
     ma.warp_id = get_warpid();
     ma.func_id = func_id;
     ma.inst_id = inst_id;

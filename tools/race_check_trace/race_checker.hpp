@@ -8,6 +8,8 @@
 #include <unordered_map>
 #include <stdint.h>
 
+#include "common.h"
+
 class Checker {
 private:
     struct Instruction {
@@ -23,9 +25,9 @@ private:
             return (func_id == other.func_id &&
                     inst_id == other.inst_id);
         }
-    }
+    };
 
-    class HashInstruction { 
+    struct HashInstruction { 
         size_t operator()(const Instruction &i) const
         { 
             return (std::hash<int>()(i.func_id)) ^  
@@ -41,16 +43,16 @@ private:
         Address() {
             load = std::unordered_set<int>();
             store = std::unordered_set<int>();
-            insts = std::unordered_set<Instruction>();
+            insts = std::unordered_set<Instruction, HashInstruction>();
         }
-    }
+    };
 
     // SFR in a block
     struct SFR {
         int block_id;
         int SFR_id;
 
-        SFR(int block_id. int SFR_id) {
+        SFR(int block_id, int SFR_id) {
             this->block_id = block_id;
             this->SFR_id = SFR_id;
         }
@@ -59,9 +61,9 @@ private:
             return (block_id == other.block_id &&
                     SFR_id == other.SFR_id);
         }
-    }
+    };
 
-    class HashSFR { 
+    struct HashSFR { 
         size_t operator()(const SFR &i) const
         { 
             return (std::hash<int>()(i.block_id)) ^  
@@ -73,7 +75,7 @@ private:
     std::unordered_map<SFR, std::unordered_map<uint64_t, Address>, HashSFR> SFR_shared_mem;
 
     // key: SFR, val: global_mem (a dic of addr : Address (has two set of Thread ID))
-    std::unordered_map<SFR, std::unordered_map<uint64_t, Address>, HashSFR> SFR_shared_mem;
+    std::unordered_map<SFR, std::unordered_map<uint64_t, Address>, HashSFR> SFR_global_mem;
 
     // key: addr, val: Address (has two set of Block ID)
     std::unordered_map<uint64_t, Address> global_mem;
@@ -82,7 +84,11 @@ public:
     Checker() {
         SFR_shared_mem = std::unordered_map<SFR, std::unordered_map<uint64_t, Address>, HashSFR>();
         SFR_shared_mem = std::unordered_map<SFR, std::unordered_map<uint64_t, Address>, HashSFR>();
-        GLOBAL_mem = std::unordered_map<uint64_t, Address>();
+        global_mem = std::unordered_map<uint64_t, Address>();
     }
 
-}
+    // read input which is the memory access information
+    void read(mem_access_t *ma) {
+        return;
+    }
+};
