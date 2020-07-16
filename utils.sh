@@ -43,16 +43,6 @@ case $1 in
 
     LD_PRELOAD=$tool_dir/$1/$1.so ./$app_dir/$2/run | scripts/race_check_helper.py
     ;;
-  
-  "race_check_trace")
-    chmod +x scripts/race_check_helper.py
-    # will combine with scripts/print_data_race_helper.py
-    make --directory $tool_dir/$1
-
-    make --directory $app_dir/$2
-
-    LD_PRELOAD=$tool_dir/$1/$1.so ./$app_dir/$2/run | scripts/race_check_helper.py > datarace.txt
-    ;;
 
   "rr")
     LD_PRELOAD=$tool_dir/race_check_trace/race_check_trace.so ./$app_dir/$2/run | scripts/race_check_helper.py > datarace.txt
