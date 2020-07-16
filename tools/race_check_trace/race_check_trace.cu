@@ -55,13 +55,16 @@
 /* contains definition of the mem_access_t structure */
 #include "common.h"
 
+/* output debug information of not */
+#define DEBUG 0
+
 /* Channel used to communicate from GPU to CPU receiving thread */
 #define CHANNEL_SIZE (1l << 20)
 static __managed__ ChannelDev channel_dev;
 static ChannelHost channel_host;
 
 /* synchronization operation counter, updated by the GPU threads */
-__managed__ int syn_ops_counter = 0;
+int *syn_ops_counter = 0;
 
 /* receiving thread and its control variables */
 pthread_t recv_thread;
@@ -134,9 +137,6 @@ void instrument_function_if_needed(CUcontext ctx, CUfunction func) {
 
         /* iterate on all the static instructions in the function */
         for (auto instr : instrs) {
-            /* print SASS, which is used by python script*/
-            printf("\n#SASS#%s\n", instr->getSass());
-
             // check syn op first
             const char *shortOpcode = instr->getOpcodeShort();
 
@@ -150,7 +150,7 @@ void instrument_function_if_needed(CUcontext ctx, CUfunction func) {
                 // instrument after the syn op so all thread are ready
                 // then we can just update the counter by one
                 nvbit_insert_call(instr, "instrument_syn", IPOINT_AFTER);
-                nvbit_add_call_arg_const_val64(instr, (uint64_t)&syn_ops_counter);
+                nvbit_add_call_arg_const_val64(instr, (uint64_t)syn_ops_counter);
                 inst_id++;
                 continue; //skip the rest
             } 
@@ -185,8 +185,6 @@ void instrument_function_if_needed(CUcontext ctx, CUfunction func) {
                     nvbit_insert_call(instr, "instrument_mem", IPOINT_BEFORE);
                     /* predicate value */
                     nvbit_add_call_arg_pred_val(instr);
-                    /* opcode id */
-                    nvbit_add_call_arg_const_val32(instr, opcode_id);
                     /* func id */
                     nvbit_add_call_arg_const_val32(instr, func_id);    
                     /* inst id */
@@ -199,7 +197,7 @@ void instrument_function_if_needed(CUcontext ctx, CUfunction func) {
                     // TODO: need to consider the case that memOpType is GENERIC
                     nvbit_add_call_arg_const_val32(instr, instr->getMemOpType()==Instr::memOpType::SHARED);
                     nvbit_add_call_arg_const_val32(instr, instr->isLoad());
-                    nvbit_add_call_arg_const_val64(instr, (uint64_t)&syn_ops_counter);
+                    nvbit_add_call_arg_const_val64(instr, (uint64_t)syn_ops_counter);
                 }
             }
             inst_id++;
@@ -214,7 +212,7 @@ __global__ void flush_channel() {
     /* push memory access with negative cta id to communicate the kernel is
      * completed */
     mem_access_t ma;
-    ma.cta_id_x = -1;
+    ma.block_id = -1;
     channel_dev.push(&ma, sizeof(mem_access_t));
 
     /* flush channel */
@@ -230,27 +228,35 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
         cuLaunchKernel_params *p = (cuLaunchKernel_params *)params;
 
         if (!is_exit) {
-            int nregs;
-            CUDA_SAFECALL(
-                cuFuncGetAttribute(&nregs, CU_FUNC_ATTRIBUTE_NUM_REGS, p->f));
-
-            int shmem_static_nbytes;
-            CUDA_SAFECALL(
-                cuFuncGetAttribute(&shmem_static_nbytes,
-                                   CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES, p->f));
+            /* allocate syn_ops_counter for each block */
+            int num_block = p->gridDimX * p->gridDimY * p->gridDimZ;
+            CUDA_SAFECALL(cudaMalloc(&syn_ops_counter, num_block * sizeof(int)));
+            CUDA_SAFECALL(cudaMemset(syn_ops_counter, 0, num_block * sizeof(int)));
+            
 
             instrument_function_if_needed(ctx, p->f);
 
             nvbit_enable_instrumented(ctx, p->f, true);
 
-            printf(
-                "Kernel %s - grid size %d,%d,%d - block size %d,%d,%d - nregs "
-                "%d - shmem %d - cuda stream id %ld\n",
-                nvbit_get_func_name(ctx, p->f), p->gridDimX, p->gridDimY,
-                p->gridDimZ, p->blockDimX, p->blockDimY, p->blockDimZ, nregs,
-                shmem_static_nbytes + p->sharedMemBytes, (uint64_t)p->hStream);
             recv_thread_receiving = true;
 
+            if (DEBUG) {
+                int nregs;
+                CUDA_SAFECALL(
+                    cuFuncGetAttribute(&nregs, CU_FUNC_ATTRIBUTE_NUM_REGS, p->f));
+
+                int shmem_static_nbytes;
+                CUDA_SAFECALL(
+                    cuFuncGetAttribute(&shmem_static_nbytes,
+                                    CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES, p->f));
+
+                printf(
+                    "Kernel %s - grid size %d,%d,%d - block size %d,%d,%d - nregs "
+                    "%d - shmem %d - cuda stream id %ld\n",
+                    nvbit_get_func_name(ctx, p->f), p->gridDimX, p->gridDimY,
+                    p->gridDimZ, p->blockDimX, p->blockDimY, p->blockDimZ, nregs,
+                    shmem_static_nbytes + p->sharedMemBytes, (uint64_t)p->hStream);
+            }
         } else {
             /* make sure current kernel is completed */
             cudaDeviceSynchronize();
@@ -293,31 +299,31 @@ void *recv_thread_fun(void *) {
                 mem_access_t *ma =
                     (mem_access_t *)&recv_buffer[num_processed_bytes];
 
-                /* when we get this cta_id_x it means the kernel has completed
+                /* when we get this block_id it means the kernel has completed
                  */
-                if (ma->cta_id_x == -1) {
+                if (ma->block_id == -1) {
                     recv_thread_receiving = false;
                     break;
                 }
                 
                 /* "#{ld/st}#" is used to grep */
-                if (ma->is_load) {
-                    for (int i = 0; i < 32; i++) {
-                        if (ma->addrs[i] == 0) continue;
-                        printf("\n#ld#%d,%d,%d,%d,%d,%d,%d,%d,%d,0x%016lx\n",
-                            ma->is_shared_memory,  ma->cta_id_x,
-                            ma->cta_id_y, ma->cta_id_z, ma->warp_id, i, ma->func_id, ma->inst_id,
-                            ma->SFR_id, ma->addrs[i]);
-                    }
-                } else {
-                    for (int i = 0; i < 32; i++) {
-                        if (ma->addrs[i] == 0) continue;
-                        printf("\n#st#%d,%d,%d,%d,%d,%d,%d,%d,%d,0x%016lx\n",
-                            ma->is_shared_memory,  ma->cta_id_x,
-                            ma->cta_id_y, ma->cta_id_z, ma->warp_id, i, ma->func_id, ma->inst_id,
-                            ma->SFR_id, ma->addrs[i]);
-                    }
-                }
+                // if (ma->is_load) {
+                //     for (int i = 0; i < 32; i++) {
+                //         if (ma->addrs[i] == 0) continue;
+                //         printf("\n#ld#%d,%d,%d,%d,%d,%d,%d,%d,%d,0x%016lx\n",
+                //             ma->is_shared_memory,  ma->cta_id_x,
+                //             ma->cta_id_y, ma->cta_id_z, ma->warp_id, i, ma->func_id, ma->inst_id,
+                //             ma->SFR_id, ma->addrs[i]);
+                //     }
+                // } else {
+                //     for (int i = 0; i < 32; i++) {
+                //         if (ma->addrs[i] == 0) continue;
+                //         printf("\n#st#%d,%d,%d,%d,%d,%d,%d,%d,%d,0x%016lx\n",
+                //             ma->is_shared_memory,  ma->cta_id_x,
+                //             ma->cta_id_y, ma->cta_id_z, ma->warp_id, i, ma->func_id, ma->inst_id,
+                //             ma->SFR_id, ma->addrs[i]);
+                //     }
+                // }
                 num_processed_bytes += sizeof(mem_access_t);
             }
         }
@@ -337,6 +343,4 @@ void nvbit_at_ctx_term(CUcontext ctx) {
         recv_thread_started = false;
         pthread_join(recv_thread, NULL);
     }
-
-    printf("\nnumber of synchronization operations encountered: %d\n", syn_ops_counter);
 }

@@ -47,7 +47,7 @@
 /* contains definition of the mem_access_t structure */
 #include "common.h"
 
-extern "C" __device__ __noinline__ void instrument_mem(int pred, int opcode_id,
+extern "C" __device__ __noinline__ void instrument_mem(int pred,
                                                        int func_id,
                                                        int inst_id,
                                                        uint64_t addr,
@@ -60,8 +60,11 @@ extern "C" __device__ __noinline__ void instrument_mem(int pred, int opcode_id,
         return;
     }
 
+    int l_thread_id = (threadIdx.z * (blockDim.x * blockDim.y)) +
+                      (threadIdx.y * blockDim.x) + threadIdx.x;
+
     int active_mask = ballot(1);
-    const int laneid = get_laneid();
+    const int laneid = l_thread_id & 31;  /* use get_laneid() is less efficient */
     const int first_laneid = __ffs(active_mask) - 1;
 
     mem_access_t ma;
@@ -71,12 +74,9 @@ extern "C" __device__ __noinline__ void instrument_mem(int pred, int opcode_id,
         ma.addrs[i] = shfl(addr, i);
     }
 
-    int4 cta = get_ctaid();
-    ma.cta_id_x = cta.x;
-    ma.cta_id_y = cta.y;
-    ma.cta_id_z = cta.z;
+    ma.block_id = blockIdx.x + blockIdx.y * gridDim.x +
+                   gridDim.x * gridDim.y * blockIdx.z;
     ma.warp_id = get_warpid();
-    ma.opcode_id = opcode_id;
     ma.func_id = func_id;
     ma.inst_id = inst_id;
     ma.is_shared_memory = is_shared_memory;
@@ -95,10 +95,13 @@ extern "C" __device__ __noinline__ void instrument_mem(int pred, int opcode_id,
  * which are also refered as synchronization-free regions (SFRs)
  */
 extern "C" __device__ __noinline__ void instrument_syn(uint64_t psyn_ops_counter) {
+    int block_id = blockIdx.x + blockIdx.y * gridDim.x + gridDim.x * gridDim.y * blockIdx.z;
     if (threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0) {
-        atomicAdd((int *)psyn_ops_counter, 1);
+        atomicAdd(((int *)psyn_ops_counter) + block_id, 1);
+        printf("%d\n", ((int *)psyn_ops_counter)[block_id]);
     }
 
     // wait for other threads so can gurantee that the counter is updated after this function call
     __syncthreads();
+    
 }
