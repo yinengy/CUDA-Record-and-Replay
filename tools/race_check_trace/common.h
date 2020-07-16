@@ -40,11 +40,8 @@
 /* information collected in the instrumentation function and passed
  * on the channel from the GPU to the CPU */
 typedef struct {
-    int cta_id_x;
-    int cta_id_y;
-    int cta_id_z;
+    int block_id;
     int warp_id;
-    int opcode_id;
     int func_id;
     int inst_id;
     int is_shared_memory;
