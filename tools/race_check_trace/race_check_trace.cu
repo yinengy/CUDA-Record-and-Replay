@@ -111,9 +111,6 @@ void instrument_function_if_needed(CUcontext ctx, CUfunction func) {
 
         uint32_t inst_id = 0;
 
-        /* tell python script the content of a function begins here*/
-        printf("\n#func_begin#%s\n", func_name);
-
         /* iterate on all the static instructions in the function */
         for (auto instr : instrs) {
             // check syn op first
@@ -181,9 +178,6 @@ void instrument_function_if_needed(CUcontext ctx, CUfunction func) {
             }
             inst_id++;
         }
-
-        /* tell python script the content of a function ends here*/
-        printf("\n#func_end#\n");
     }
 }
 
@@ -265,7 +259,7 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
                 pthread_yield();
             }
 
-            printf("\n#kernelends#\n");
+            race_checker.check();
         }
     }
 }
