@@ -17,7 +17,6 @@
 #include <unordered_set>
 #include <iostream>
 #include <fstream>
-#include <vector>
 
 /* every tool needs to include this once */
 #include "nvbit_tool.h"
@@ -36,9 +35,6 @@
 
 /* output debug information of not */
 #define DEBUG 0
-
-//TODO:
-std::vector<mem_access_t> ma_vec;
 
 /* outputfile */
 std::ofstream output_file;
@@ -261,13 +257,8 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
             while (recv_thread_receiving) {
                 pthread_yield();
             }
-            std::cout << "Begin READ!" << std::endl;
-            for (auto ma: ma_vec) {
-                race_checker.read(&ma);
-            }
             std::cout << "Begin check!" << std::endl;
             race_checker.check(output_file);
-            std::cout << "FINISH check!" << std::endl;
         }
     }
 }
@@ -292,8 +283,7 @@ void *recv_thread_fun(void *) {
                     break;
                 }
                 
-                // race_checker.read(ma);
-                ma_vec.push_back(*ma);
+                race_checker.read(ma);
                 
                 num_processed_bytes += sizeof(mem_access_t);
             }
