@@ -71,7 +71,7 @@ extern "C" __device__ __noinline__ void instrument_mem(int pred,
 extern "C" __device__ __noinline__ void instrument_syn(uint64_t psyn_ops_counter) {
     int block_id = blockIdx.x + blockIdx.y * gridDim.x + gridDim.x * gridDim.y * blockIdx.z;
     if (threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0) {
-        atomicAdd(((int *)psyn_ops_counter) + block_id, 1);
+       ((int *)psyn_ops_counter)[block_id] += 1;
     }
 
     // wait for other threads so can gurantee that the counter is updated after this function call
