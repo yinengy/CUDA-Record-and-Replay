@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <sys/stat.h>
 #include <map>
+#include "xxhash.c"  // https://cyan4973.github.io/xxHash/#references
 
 /* serialize vector */
 #include <cereal/archives/binary.hpp>
@@ -94,7 +95,7 @@ void get_data_race_log() {
  */
 void *get_recorded_mem(size_t ByteCount, int is_input) {
     
-    char filename[25]; // large enough for a counter
+    char filename[40]; // large enough for a counter
 
     if (is_input) {
         cudaMemcpy_input_count++;
@@ -106,6 +107,11 @@ void *get_recorded_mem(size_t ByteCount, int is_input) {
     
     void *buffer = malloc(ByteCount);
 
+    if (!buffer) {
+        std::cerr << "fail to malloc " << ByteCount << " bytes for " << filename << std::endl;
+        exit(1);
+    }
+
     std::ifstream file(filename, std::ios::in | std::ios::binary);
         
     if (!file.is_open()) {
@@ -113,9 +119,8 @@ void *get_recorded_mem(size_t ByteCount, int is_input) {
         exit(1);
     }
 
-    file.read((char *) buffer, ByteCount);
-
-    if (!file) {
+    if (!file.read((char *) buffer, ByteCount)) {
+        std::cerr << "need to read " << ByteCount << " but ";
         std::cerr << "only " << file.gcount() << " could be read from " << filename << std::endl;
         exit(1);
     }
@@ -125,19 +130,30 @@ void *get_recorded_mem(size_t ByteCount, int is_input) {
     return buffer;
 }
 
-/* compare ptr with output in record phase */
-void compare_mem(const void *ptr, size_t ByteCount) {
-    void *to_compare = get_recorded_mem(ByteCount, 0);
+/* compare hash value of ptr with output in record phase */
+void compare_mem_hash(const void *ptr, size_t ByteCount) {
+    char filename[40]; // large enough for a counter
 
-    int is_equal = memcmp(ptr, to_compare, ByteCount);
+    cudaMemcpy_output_count++;
+    sprintf(filename, "kernel_log/omem%d.txt", cudaMemcpy_output_count);
 
-    if (is_equal != 0) {
-        std::cerr << cudaMemcpy_output_count << "th output doesn't match!\n";
+    std::ifstream file(filename, std::ios::in);
+        
+    if (!file.is_open()) {
+        std::cerr << strerror(errno) << "failed to open file.\n";
+        exit(1);
     }
 
-    free(to_compare);
-}
+    uint64_t hash_to_compare;
 
+    file >> hash_to_compare;
+
+    uint64_t hash = XXH64(ptr, ByteCount, 0);
+
+    if (hash != hash_to_compare) {
+        std::cerr << cudaMemcpy_output_count << "th output doesn't match!\n";
+    }
+}
 
 /* load arguments from log files
  * if it is not a pointer, its value with be saved to kernelParams
@@ -146,7 +162,7 @@ void compare_mem(const void *ptr, size_t ByteCount) {
 void replace_nonpointer_arguments(void **kernelParams) {
     /* open log file */
     funcParams_count++;
-    char filename[25];
+    char filename[40];
     sprintf(filename, "kernel_log/param%d.txt", funcParams_count);
     std::ifstream file;
     file.open(filename);
@@ -268,7 +284,7 @@ void replace_nonpointer_arguments(void **kernelParams) {
  */
 void get_mem_val() {
     /* deserialize vector */
-    char filename[25];
+    char filename[40];
     sprintf(filename, "kernel_log/vmem%d.bin", funcParams_count);
     std::ifstream file;
     file.open(filename);
@@ -427,7 +443,7 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
         /* dump output, so can compare it with the output in record phase */
         cuMemcpyDtoH_v2_params *p = (cuMemcpyDtoH_v2_params *)params;
 
-        compare_mem(p->dstHost, p->ByteCount);
+        compare_mem_hash(p->dstHost, p->ByteCount);
     } else if (cbid == API_CUDA_cuMemcpyHtoD_v2)  {
         cuMemcpyHtoD_v2_params *p = (cuMemcpyHtoD_v2_params *)params;
 

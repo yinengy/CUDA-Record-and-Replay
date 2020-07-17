@@ -21,6 +21,7 @@
 #include <unordered_set>
 #include <stdint.h>
 #include <map>
+#include "xxhash.c"  // https://cyan4973.github.io/xxHash/#references
 
 /* serialize vector */
 #include <cereal/archives/binary.hpp>
@@ -96,7 +97,32 @@ void dump_mem(const void *src, size_t ByteCount, int is_input) {
         exit(1);
     }
 
-    file.write((char *) src, ByteCount);
+    if (!file.write((char *) src, ByteCount)) {
+        std::cerr << "need to write " << ByteCount << " to " << filename << std::endl;
+        exit(1);
+    }
+
+    file.close();
+}
+
+// calculate hash value of memory to decrease storage overhead
+void hash_mem(const void *src, size_t ByteCount) {
+    cudaMemcpy_output_count++;
+
+    /* hash the whole memory */
+    XXH64_hash_t hash = XXH64(src, ByteCount, 0);
+
+    char filename[40];
+    sprintf(filename, "kernel_log/omem%d.txt", cudaMemcpy_output_count);
+    std::ofstream file;
+    file.open(filename);
+
+    if (file.fail()) {
+        std::cerr << strerror(errno) << "failed to open file.\n";
+        exit(1);
+    }
+
+    file << (uint64_t) hash << std::endl;
 
     file.close();
 }
@@ -399,7 +425,7 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
         /* get parameters */
         cuMemcpyDtoH_v2_params *p = (cuMemcpyDtoH_v2_params *)params;
 
-        dump_mem(p->dstHost, p->ByteCount, 0);
+        hash_mem(p->dstHost, p->ByteCount);
     } else if ((cbid == API_CUDA_cuMemcpyHtoD_v2) && is_exit)  {
         cuMemcpyHtoD_v2_params *p = (cuMemcpyHtoD_v2_params *)params;
 
