@@ -79,7 +79,7 @@ int func_counter = 0;
  */
 void dump_mem(const void *src, size_t ByteCount, int is_input) {
     
-    char filename[25]; // large enough for a counter
+    char filename[40]; // large enough for a counter
 
     if (is_input) {
         cudaMemcpy_input_count++;
@@ -161,7 +161,7 @@ void save_nonpointer_arguments(void **kernelParams,std::string func_sig) {
      * if it is a pointer, its value will be marked as "POINTER"
      */ 
     funcParams_count++;
-    char filename[25];
+    char filename[40];
     sprintf(filename, "kernel_log/param%d.txt", funcParams_count);
     std::ofstream file;
     file.open(filename);
@@ -408,6 +408,10 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
         cbid == API_CUDA_cuLaunchKernel)) {
         cuLaunchKernel_params *p = (cuLaunchKernel_params *)params;
 
+        if (data_race_log.size() == 0) {
+            return; // don't need to instrument
+        }
+
         if (!is_exit) {
             /* get kernel function signature */    
             std::string func_sig(nvbit_get_func_name(ctx, p->f));
@@ -452,7 +456,7 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
             }
 
             /* serilize vector */
-            char filename[25];
+            char filename[40];
             sprintf(filename, "kernel_log/vmem%d.bin", funcParams_count);
             std::ofstream file;
             file.open(filename);
@@ -470,7 +474,7 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
         }
     }
 }
-
+ 
 void nvbit_at_ctx_init(CUcontext ctx) {
     /* all log files will put into this directory */
     mkdir("kernel_log", 0777);

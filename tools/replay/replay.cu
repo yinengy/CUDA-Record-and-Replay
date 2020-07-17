@@ -94,7 +94,7 @@ void get_data_race_log() {
  */
 void *get_recorded_mem(size_t ByteCount, int is_input) {
     
-    char filename[25]; // large enough for a counter
+    char filename[40]; // large enough for a counter
 
     if (is_input) {
         cudaMemcpy_input_count++;
@@ -146,7 +146,7 @@ void compare_mem(const void *ptr, size_t ByteCount) {
 void replace_nonpointer_arguments(void **kernelParams) {
     /* open log file */
     funcParams_count++;
-    char filename[25];
+    char filename[40];
     sprintf(filename, "kernel_log/param%d.txt", funcParams_count);
     std::ifstream file;
     file.open(filename);
@@ -268,7 +268,7 @@ void replace_nonpointer_arguments(void **kernelParams) {
  */
 void get_mem_val() {
     /* deserialize vector */
-    char filename[25];
+    char filename[40];
     sprintf(filename, "kernel_log/vmem%d.bin", funcParams_count);
     std::ifstream file;
     file.open(filename);
