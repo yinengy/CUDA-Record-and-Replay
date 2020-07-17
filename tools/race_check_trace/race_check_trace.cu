@@ -15,6 +15,8 @@
 #include <string>
 #include <map>
 #include <unordered_set>
+#include <iostream>
+#include <fstream>
 
 /* every tool needs to include this once */
 #include "nvbit_tool.h"
@@ -33,6 +35,9 @@
 
 /* output debug information of not */
 #define DEBUG 0
+
+/* outputfile */
+std::ofstream output_file;
 
 /* Channel used to communicate from GPU to CPU receiving thread */
 #define CHANNEL_SIZE (1l << 20)
@@ -106,7 +111,7 @@ void instrument_function_if_needed(CUcontext ctx, CUfunction func) {
 
         /* insert function name into the vector*/
         /* its index is func_id */
-        int func_id = id_to_func_name.size();
+        uint32_t func_id = id_to_func_name.size();
         id_to_func_name.push_back(std::string(func_name));
 
         uint32_t inst_id = 0;
@@ -131,12 +136,6 @@ void instrument_function_if_needed(CUcontext ctx, CUfunction func) {
                 continue; //skip the rest
             } 
 
-            if (inst_id < instr_begin_interval || inst_id >= instr_end_interval ||
-                ((instr->getMemOpType()!=Instr::memOpType::GLOBAL
-                    && instr->getMemOpType()!=Instr::memOpType::SHARED && instr->getMemOpType()!=Instr::memOpType::GENERIC))) {
-                inst_id++;
-                continue;
-            }
             if (verbose) {
                 instr->printDecoded();
             }
@@ -259,7 +258,7 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
                 pthread_yield();
             }
 
-            race_checker.check();
+            race_checker.check(output_file);
         }
     }
 }
@@ -298,6 +297,8 @@ void nvbit_at_ctx_init(CUcontext ctx) {
     recv_thread_started = true;
     channel_host.init(0, CHANNEL_SIZE, &channel_dev, NULL);
     pthread_create(&recv_thread, NULL, recv_thread_fun, NULL);
+
+    output_file.open("datarace.txt");
 }
 
 void nvbit_at_ctx_term(CUcontext ctx) {
@@ -305,4 +306,6 @@ void nvbit_at_ctx_term(CUcontext ctx) {
         recv_thread_started = false;
         pthread_join(recv_thread, NULL);
     }
+
+    output_file.close();
 }

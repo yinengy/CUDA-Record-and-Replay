@@ -7,6 +7,9 @@
 #include <unordered_set>
 #include <unordered_map>
 #include <stdint.h>
+#include <algorithm> // set_union
+#include <iostream>
+#include <fstream>
 
 #include "common.h"
 
@@ -17,8 +20,8 @@ private:
         int inst_id;
 
         Instruction(int func_id, int inst_id) {
-            func_id = func_id;
-            inst_id = inst_id;
+            this->func_id = func_id;
+            this->inst_id = inst_id;
         }
 
         bool operator==(const Instruction &other) const { 
@@ -44,6 +47,22 @@ private:
             load = std::unordered_set<int>();
             store = std::unordered_set<int>();
             insts = std::unordered_set<Instruction, HashInstruction>();
+        }
+
+        // memory accesses from different thread and at least one store
+        bool has_race() {
+            if (store.size() > 1) {
+                return true;
+            } else if (store.size() == 1) {
+                if (load.size() == 1) {
+                    // load and store from the same thread
+                    return load != store;
+                } else {
+                    return true;
+                }
+            } 
+            
+            return false; // no store
         }
     };
 
@@ -92,7 +111,7 @@ public:
         SFR s = SFR(ma->block_id, ma->SFR_id);
         int base_thread_id = ma->warp_id * 32;
         Instruction inst = Instruction(ma->func_id, ma->inst_id);
-
+        
         for (int i = 0; i < 32; i++) {
             uint64_t addr = ma->addrs[i];
             int thread_id = base_thread_id + i;
@@ -104,18 +123,18 @@ public:
 
             if (ma->is_load) {
                 if (ma->is_shared_memory) {
-                    Address a = SFR_shared_mem_get(s, addr);
+                    Address &a = SFR_shared_mem_get(s, addr);
                     a.load.insert(thread_id);
                     a.insts.insert(inst);
                 } else { // global memory
                     // intra block
-                    Address a = SFR_global_mem_get(s, addr);
+                    Address &a = SFR_global_mem_get(s, addr);
                     
                     a.load.insert(thread_id);
                     a.insts.insert(inst);
 
                     // inter block
-                    Address g = Global_mem_get(addr);
+                    Address &g = Global_mem_get(addr);
 
                     // add block id rather than thread id
                     g.load.insert(ma->block_id);
@@ -123,18 +142,18 @@ public:
                 }
             } else {
                 if (ma->is_shared_memory) {
-                    Address a = SFR_shared_mem_get(s, addr);
+                    Address &a = SFR_shared_mem_get(s, addr);
                     a.store.insert(thread_id);
                     a.insts.insert(inst);
                 } else { // global memory
                     // intra block
-                    Address a = SFR_global_mem_get(s, addr);
+                    Address &a = SFR_global_mem_get(s, addr);
                     
                     a.store.insert(thread_id);
                     a.insts.insert(inst);
 
                     // inter block
-                    Address g = Global_mem_get(addr);
+                    Address &g = Global_mem_get(addr);
 
                     // add block id rather than thread id
                     g.store.insert(ma->block_id);
@@ -146,69 +165,86 @@ public:
 
     // check data race based on current information
     // will print "func_id,inst_id" involved
-    void check() {
+    void check(std::ofstream & output_file) {
+        auto races = std::unordered_set<Instruction, HashInstruction>();
+
+        // intra block shared memory
+        for (auto& itr1 : SFR_shared_mem) {
+            auto shared_mem = itr1.second;
+            for (auto& itr2 : shared_mem) {
+                Address a = itr2.second;
+                if (a.has_race()) {
+                    races.insert(a.insts.begin(), a.insts.end());
+                }
+            }
+        }
+
+        // intra block global memory
+        for (auto& itr1 : SFR_global_mem) {
+            auto global_mem = itr1.second;
+            for (auto& itr2 : global_mem) {
+                Address a = itr2.second;
+                if (a.has_race()) {
+                    races.insert(a.insts.begin(), a.insts.end());
+                }
+            }
+        }
+
+        // inter block global memory
+        for (auto& itr : Global_mem) {
+            auto a = itr.second;
+            if (a.has_race()) {
+                races.insert(a.insts.begin(), a.insts.end());
+            }
+        }
+
+        // report races
+        for (auto inst : races) {
+            output_file << inst.func_id << "," << inst.inst_id << "\n";
+        }
+
         return;
     }
 
 private:
     // if s or addr doesn't exits, insert
-    // return 
-    Address SFR_shared_mem_get(SFR s, uint64_t addr) {
-        auto iter1 = SFR_shared_mem.find(s);
+    Address & SFR_shared_mem_get(SFR s, uint64_t addr) {
         std::unordered_map<uint64_t, Address> shared_mem;
-        if (iter1 == SFR_shared_mem.end()) {
-            shared_mem = std::unordered_map<uint64_t, Address>();
-            SFR_shared_mem[s] = shared_mem;
-        } else {
-            shared_mem = iter1->second;
-        }
+        if (SFR_shared_mem.find(s) == SFR_shared_mem.end()) {
+            SFR_shared_mem[s] = std::unordered_map<uint64_t, Address>(); 
+        } 
 
-        auto iter2 = shared_mem.find(addr);
-        Address a;
-        if (iter2 == shared_mem.end()) {
-            a = Address();
-            shared_mem[addr] = a;
-        } else {
-            a = iter2->second;
-        }
+        shared_mem = SFR_shared_mem[s];
 
-        return a;
+        if (shared_mem.find(addr) == shared_mem.end()) {
+            shared_mem[addr] = Address();
+        } 
+
+        return SFR_shared_mem[s][addr];
     }
 
     // if s or addr doesn't exits, insert
-    Address SFR_global_mem_get(SFR s, uint64_t addr) {
-        auto iter1 = SFR_global_mem.find(s);
+    Address & SFR_global_mem_get(SFR s, uint64_t addr) {
         std::unordered_map<uint64_t, Address> global_mem;
-        if (iter1 == SFR_global_mem.end()) {
-            global_mem = std::unordered_map<uint64_t, Address>();
-            SFR_global_mem[s] = global_mem;
-        } else {
-            global_mem = iter1->second;
-        }
+        if (SFR_global_mem.find(s) == SFR_global_mem.end()) {
+            SFR_global_mem[s] = std::unordered_map<uint64_t, Address>(); 
+        } 
 
-        auto iter2 = global_mem.find(addr);
-        Address a;
-        if (iter2 == global_mem.end()) {
-            a = Address();
-            global_mem[addr] = a;
-        } else {
-            a = iter2->second;
-        }
+        global_mem = SFR_global_mem[s];
 
-        return a;
+        if (global_mem.find(addr) == global_mem.end()) {
+            global_mem[addr] = Address();
+        } 
+
+        return SFR_global_mem[s][addr];
     }
 
     // if addr doesn't exits, insert
-    Address Global_mem_get(uint64_t addr) {
-        auto iter = Global_mem.find(addr);
-        Address g;
-        if (iter == Global_mem.end()) {
-            g = Address();
-            Global_mem[addr] = g;
-        } else {
-            g = iter->second;
-        }
+    Address & Global_mem_get(uint64_t addr) {
+        if (Global_mem.find(addr) == Global_mem.end()) {
+            Global_mem[addr] = Address();
+        } 
 
-        return g;
+        return Global_mem[addr];
     }
 };
