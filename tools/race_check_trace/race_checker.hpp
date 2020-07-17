@@ -4,8 +4,8 @@
  * Yineng Yan (yinengy@umich.edu), 2020
  */
  
-#include <unordered_set>
-#include <unordered_map>
+#include <google/dense_hash_set>
+#include <google/dense_hash_map>
 #include <stdint.h>
 #include <algorithm> // set_union
 #include <iostream>
@@ -13,11 +13,14 @@
 
 #include "common.h"
 
+
 class Checker {
 private:
     struct Instruction {
         int func_id;
         int inst_id;
+
+        Instruction() { }
 
         Instruction(int func_id, int inst_id) {
             this->func_id = func_id;
@@ -39,14 +42,18 @@ private:
     }; 
 
     struct Address {
-        std::unordered_set<int> load;   // set of Thread ID(or Block ID for inter block races) that read from this address
-        std::unordered_set<int> store;  // set of Thread ID(or Block ID for inter block races) that write to this address
-        std::unordered_set<Instruction, HashInstruction> insts;  // set of Inst wrt to Thread ID in self.load and self.store
+        google::dense_hash_set<int> load;   // set of Thread ID(or Block ID for inter block races) that read from this address
+        google::dense_hash_set<int> store;  // set of Thread ID(or Block ID for inter block races) that write to this address
+        google::dense_hash_set<Instruction, HashInstruction> insts;  // set of Inst wrt to Thread ID in self.load and self.store
 
         Address() {
-            load = std::unordered_set<int>();
-            store = std::unordered_set<int>();
-            insts = std::unordered_set<Instruction, HashInstruction>();
+            load = google::dense_hash_set<int>();
+            store = google::dense_hash_set<int>();
+            insts = google::dense_hash_set<Instruction, HashInstruction>();
+
+            load.set_empty_key(-1);
+            store.set_empty_key(-1);
+            insts.set_empty_key(Instruction(-1, -1));
         }
 
         // memory accesses from different thread and at least one store
@@ -71,6 +78,8 @@ private:
         int block_id;
         int SFR_id;
 
+        SFR() {}
+
         SFR(int block_id, int SFR_id) {
             this->block_id = block_id;
             this->SFR_id = SFR_id;
@@ -91,19 +100,24 @@ private:
     }; 
 
     // key: SFR, val: shared_mem (a dic of addr : Address (has two set of Thread ID))
-    std::unordered_map<SFR, std::unordered_map<uint64_t, Address>, HashSFR> SFR_shared_mem;
+    google::dense_hash_map<SFR, google::dense_hash_map<uint64_t, Address>, HashSFR> SFR_shared_mem;
 
     // key: SFR, val: global_mem (a dic of addr : Address (has two set of Thread ID))
-    std::unordered_map<SFR, std::unordered_map<uint64_t, Address>, HashSFR> SFR_global_mem;
+    google::dense_hash_map<SFR, google::dense_hash_map<uint64_t, Address>, HashSFR> SFR_global_mem;
 
     // key: addr, val: Address (has two set of Block ID)
-    std::unordered_map<uint64_t, Address> Global_mem;
+    google::dense_hash_map<uint64_t, Address> Global_mem;
 
 public:
     Checker() {
-        SFR_shared_mem = std::unordered_map<SFR, std::unordered_map<uint64_t, Address>, HashSFR>();
-        SFR_global_mem = std::unordered_map<SFR, std::unordered_map<uint64_t, Address>, HashSFR>();
-        Global_mem = std::unordered_map<uint64_t, Address>();
+        SFR_shared_mem = google::dense_hash_map<SFR, google::dense_hash_map<uint64_t, Address>, HashSFR>();
+        SFR_global_mem = google::dense_hash_map<SFR, google::dense_hash_map<uint64_t, Address>, HashSFR>();
+        Global_mem = google::dense_hash_map<uint64_t, Address>();
+
+        /* required by google dense_hash_map */
+        SFR_shared_mem.set_empty_key(SFR(-1, -1));
+        SFR_global_mem.set_empty_key(SFR(-1, -1));
+        Global_mem.set_empty_key(0);
     }
 
     // read input which is the memory access information
@@ -166,7 +180,8 @@ public:
     // check data race based on current information
     // will print "func_id,inst_id" involved
     void check(std::ofstream & output_file) {
-        auto races = std::unordered_set<Instruction, HashInstruction>();
+        auto races = google::dense_hash_set<Instruction, HashInstruction>();
+        races.set_empty_key(Instruction(-1, -1));
 
         // intra block shared memory
         for (auto& itr1 : SFR_shared_mem) {
@@ -209,9 +224,12 @@ public:
 private:
     // if s or addr doesn't exits, insert
     Address & SFR_shared_mem_get(SFR s, uint64_t addr) {
-        std::unordered_map<uint64_t, Address> shared_mem;
+        google::dense_hash_map<uint64_t, Address> shared_mem;
+        shared_mem.set_empty_key(0);
         if (SFR_shared_mem.find(s) == SFR_shared_mem.end()) {
-            SFR_shared_mem[s] = std::unordered_map<uint64_t, Address>(); 
+            google::dense_hash_map<uint64_t, Address> temp;
+            temp.set_empty_key(0);
+            SFR_shared_mem[s] = temp; 
         } 
 
         shared_mem = SFR_shared_mem[s];
@@ -225,9 +243,12 @@ private:
 
     // if s or addr doesn't exits, insert
     Address & SFR_global_mem_get(SFR s, uint64_t addr) {
-        std::unordered_map<uint64_t, Address> global_mem;
+        google::dense_hash_map<uint64_t, Address> global_mem;
+        global_mem.set_empty_key(0);
         if (SFR_global_mem.find(s) == SFR_global_mem.end()) {
-            SFR_global_mem[s] = std::unordered_map<uint64_t, Address>(); 
+            google::dense_hash_map<uint64_t, Address> temp;
+            temp.set_empty_key(0);
+            SFR_global_mem[s] = temp; 
         } 
 
         global_mem = SFR_global_mem[s];
