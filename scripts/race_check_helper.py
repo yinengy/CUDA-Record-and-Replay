@@ -18,6 +18,9 @@ kernel_counter = 0
 
 functions = []
 
+OUTPUT_ID_ONLY = True
+OUTPUT_VERBOSE = False
+
 class bcolors:
     HEADER = '\033[95m'
     OKBLUE = '\033[94m'
@@ -50,8 +53,11 @@ class instruction:
 
     def __str__(self):
         # at function name, instruction SASS)
-        return "{},{}".format(self.func_id, self.inst_id)
-
+        func = functions[self.func_id]
+        if (OUTPUT_ID_ONLY):
+            return "{},{}".format(self.func_id, self.inst_id)
+        else:
+            return "at {}, {}".format(func.func_name, func.insts[self.inst_id][:-2])
 
 # Thread in a block
 class Thread:
@@ -73,43 +79,35 @@ class Thread:
 
 # SFR in a block
 class SFR:
-    def __init__(self, cta_id_x, cta_id_y, cta_id_z, SFR_id):
-        self.cta_id_x = cta_id_x
-        self.cta_id_y = cta_id_y
-        self.cta_id_z = cta_id_z
+    def __init__(self, block_id, SFR_id):
+        self.block_id = block_id
         self.SFR_id = SFR_id
 
     def __hash__(self):
-         return hash((self.cta_id_x, self.cta_id_y, self.cta_id_z, self.SFR_id))
+         return hash((self.block_id, self.SFR_id))
     
     def __eq__(self, other):
-        return self.cta_id_x == other.cta_id_x and \
-        self.cta_id_y == other.cta_id_y and \
-        self.cta_id_z == other.cta_id_z and \
+        return self.block_id == other.block_id and \
         self.SFR_id == other.SFR_id
 
     def __str__(self):
-        # "Block_id: (CTA.x CTA.y CTA.z), SFR_id: SFR ID"
-        return "Block_id: ({} {} {}), SFR_id: {}".format(self.cta_id_x, self.cta_id_y, self.cta_id_z, self.SFR_id)
+        # "Block_id: block_id, SFR_id: SFR ID"
+        return "Block_id: ({}), SFR_id: {}".format(self.block_id, self.SFR_id)
 
 
 class Block:
-    def __init__(self, cta_id_x, cta_id_y, cta_id_z):
-        self.cta_id_x = cta_id_x
-        self.cta_id_y = cta_id_y
-        self.cta_id_z = cta_id_z
+    def __init__(self, block_id):
+        self.block_id = block_id
 
     def __hash__(self):
-         return hash((self.cta_id_x, self.cta_id_y, self.cta_id_z))
+         return hash((self.block_id))
     
     def __eq__(self, other):
-        return self.cta_id_x == other.cta_id_x and \
-        self.cta_id_y == other.cta_id_y and \
-        self.cta_id_z == other.cta_id_z
+        return self.block_id == other.block_id
 
     def __str__(self):
-        # (CTA.x CTA.y CTA.z)
-        return "({} {} {})".format(self.cta_id_x, self.cta_id_y, self.cta_id_z)
+        # (block_id)
+        return "({})".format(self.block_id)
 
 
 class Function:
@@ -155,17 +153,17 @@ def process_message():
             continue
         
         # handle load and store message
-        # format: "#ld#is_shared_memory, cta_id_x, cta_id_y, cta_id_z, warp_id, lane_id, func_id, inst_id, SFR_id, addr\n"
+        # format: "#ld#is_shared_memory, block_id, warp_id, lane_id, func_id, inst_id, SFR_id, addr\n"
         temp = line.strip('\n')[4:].split(",")
 
-        if (len(temp) != 10):  # skip unwanted output
+        if (len(temp) != 8):  # skip unwanted output
             continue
 
         addr = temp[-1]
-        t = Thread(temp[4], temp[5])
-        s = SFR(temp[1], temp[2], temp[3], temp[-2])
-        b = Block(temp[1], temp[2], temp[3])
-        inst = instruction(int(temp[6]), int(temp[7]))
+        t = Thread(temp[2], temp[3])
+        s = SFR(temp[1], temp[-2])
+        b = Block(temp[1])
+        inst = instruction(int(temp[4]), int(temp[5]))
 
         if "#ld#" in line: 
             if (temp[0] == '1'): # shared memory
@@ -202,7 +200,7 @@ def process_message():
                 # add inst to inst set
                 GLOBAL_mem[addr].insts.add(inst) 
 
-        elif "#st#" in line: # format: "#st#is_shared_memory, cta_id_x, cta_id_y, cta_id_z, warp_id, lane_id,func_id, inst_id, SFR_id, addr\n"
+        elif "#st#" in line: # format: "#st#is_shared_memory, block_id, warp_id, lane_id,func_id, inst_id, SFR_id, addr\n"
             if (temp[0] == '1'): # shared memory
                 if s not in SFR_shared_mem:
                     SFR_shared_mem[s] = {}
@@ -254,6 +252,8 @@ def check_result(SFR_shared_mem, SFR_global_mem, GLOBAL_mem):
 
     # report races
     for race in intra_shared_races:
+        if (OUTPUT_VERBOSE):
+            print(bcolors.WARNING + "Warning! There may be an intra block shared memory data race involving following instructions:" + bcolors.ENDC)
         for inst in race:
             print(inst)
                 
@@ -268,6 +268,8 @@ def check_result(SFR_shared_mem, SFR_global_mem, GLOBAL_mem):
 
     # report races
     for race in intra_global_races:
+        if (OUTPUT_VERBOSE):
+            print(bcolors.WARNING + "Warning! There may be an intra block global memory data race involving following instructions:" + bcolors.ENDC)
         for inst in race:
             print(inst)
 
@@ -280,8 +282,24 @@ def check_result(SFR_shared_mem, SFR_global_mem, GLOBAL_mem):
 
     # report races
     for race in inter_global_races:
+        if (OUTPUT_VERBOSE):
+            print(bcolors.WARNING + "Warning! There may be an inter block global memory data race involving following instructions:" + bcolors.ENDC)
         for inst in race:
             print(inst)
+
+    race_counter = len(intra_shared_races) + len(intra_global_races) + len(inter_global_races)
+    
+    if (not OUTPUT_VERBOSE):
+        return
+    
+    if race_counter == 0:
+        print(bcolors.OKGREEN + "no data race is found in the {}th execution of kernel.".format(kernel_counter) + bcolors.ENDC)
+    else:
+        print(bcolors.WARNING + "There are {} potential data races in the {}th execution of kernel.".format(race_counter, kernel_counter) + bcolors.ENDC)
+        print(bcolors.WARNING + "{} of them are intra block shared memory data races.".format(len(intra_shared_races)) + bcolors.ENDC)
+        print(bcolors.WARNING + "{} of them are intra block global memory data races.".format(len(intra_global_races)) + bcolors.ENDC)
+        print(bcolors.WARNING + "{} of them are inter block global memory data races.".format(len(inter_global_races)) + bcolors.ENDC)
+    print()
 
 if __name__ == "__main__":
     process_message()
