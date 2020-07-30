@@ -261,10 +261,13 @@ void save_nonpointer_arguments(void **kernelParams,std::string func_sig) {
             file << ((unsigned long long **) kernelParams)[i][0]; 
         } else if (type == "float") {
             // float
-            file << ((float **) kernelParams)[i][0]; 
+            // Note: this is treated as int to keep every bits
+            // assume sizeof(float) == sizeof(int)
+            file << ((int **) kernelParams)[i][0]; 
         } else if (type == "double") {
             // double
-            file << ((double **) kernelParams)[i][0]; 
+            // Note: this is treated as long long to keep every bits
+            file << ((long long **) kernelParams)[i][0]; 
         } else if (type == "longdouble") {
             // long double
             file << ((long double **) kernelParams)[i][0]; 
@@ -434,9 +437,7 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
         cbid == API_CUDA_cuLaunchKernel)) {
         cuLaunchKernel_params *p = (cuLaunchKernel_params *)params;
 
-        if (data_race_log.size() == 0) {
-            return; // don't need to instrument
-        }
+        
 
         if (!is_exit) {
             /* get kernel function signature */    
@@ -444,6 +445,11 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
 
             /* record kernel arguments */
             save_nonpointer_arguments(p->kernelParams, func_sig);
+
+            if (data_race_log.size() == 0) {
+                recv_thread_receiving = true;
+                return; // don't need to instrument
+            }
 
             /* instrument this kernel */
             instrument_function_if_needed(ctx, p->f);
@@ -458,6 +464,10 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
 
             recv_thread_receiving = true;
         } else {
+            if (data_race_log.size() == 0) {
+                return; // don't need to instrument
+            }
+
             /* make sure current kernel is completed */
             cudaDeviceSynchronize();
             assert(cudaGetLastError() == cudaSuccess);

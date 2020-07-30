@@ -257,22 +257,25 @@ void replace_nonpointer_arguments(void **kernelParams) {
             *(((unsigned long long **) kernelParams)[i]) = value;
         } else if (type == "float") {
             // float
-            float value;
+            int value;
             iss >> value;
-            *(((float **) kernelParams)[i]) = value;
+            *(((int **) kernelParams)[i]) = value;
         } else if (type == "double") {
             // double
-            double value;
+            long long value;
             iss >> value;
-            *(((double **) kernelParams)[i]) = value;
+            *(((long long **) kernelParams)[i]) = value;
         } else if (type == "longdouble") {
             // long double
             long double value;
             iss >> value;
             *(((long double **) kernelParams)[i]) = value;
+            std::cerr << strerror(errno) << "long double argument is not supported.\n";
+            exit(1);
         } else {
             // TODO: implement more types
-            continue;
+            std::cerr << strerror(errno) << "user defined argument type is not supported.\n";
+            exit(1);
         }
     }
 
