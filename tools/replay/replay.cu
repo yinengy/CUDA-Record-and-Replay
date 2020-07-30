@@ -464,13 +464,13 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
     } else if ((cbid == API_CUDA_cuLaunchKernel_ptsz ||
         cbid == API_CUDA_cuLaunchKernel)) {
         cuLaunchKernel_params *p = (cuLaunchKernel_params *)params;
-
-        if (data_race_log.size() == 0) {
-            return; // don't need to instrument
-        }
         
         if (!is_exit) {
             replace_nonpointer_arguments(p->kernelParams);
+
+            if (data_race_log.size() == 0) {
+                return; // don't need to instrument
+            }
 
             /* prevent re-entry on the nvbit_callback when call cudaMalloc */
             skip_flag = true;
@@ -482,6 +482,10 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
 
             nvbit_enable_instrumented(ctx, p->f, true);
         } else {
+            if (data_race_log.size() == 0) {
+                return; // don't need to instrument
+            }
+            
             skip_flag = true;
             cudaFree(d_mem_val);
             cudaFree(d_mem_counter);
