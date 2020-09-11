@@ -132,8 +132,7 @@ void get_data_race_log() {
     file.open("datarace.txt");
 
     if (file.fail()) {
-        std::cerr << strerror(errno) << "failed to open file.\n";
-        exit(1);
+        return;
     }
 
     int func_id, inst_id;
@@ -428,105 +427,15 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
         /* get parameters */
         cuMemcpyDtoH_v2_params *p = (cuMemcpyDtoH_v2_params *)params;
 
-        hash_mem(p->dstHost, p->ByteCount);
+        dump_mem(p->dstHost, p->ByteCount, 0);
     } else if ((cbid == API_CUDA_cuMemcpyHtoD_v2) && is_exit)  {
         cuMemcpyHtoD_v2_params *p = (cuMemcpyHtoD_v2_params *)params;
 
         dump_mem(p->srcHost, p->ByteCount, 1);
-    } else if ((cbid == API_CUDA_cuLaunchKernel_ptsz ||
-        cbid == API_CUDA_cuLaunchKernel)) {
-        cuLaunchKernel_params *p = (cuLaunchKernel_params *)params;
-
-        
-
-        if (!is_exit) {
-            /* get kernel function signature */    
-            std::string func_sig(nvbit_get_func_name(ctx, p->f));
-
-            /* record kernel arguments */
-            save_nonpointer_arguments(p->kernelParams, func_sig);
-
-            if (data_race_log.size() == 0) {
-                recv_thread_receiving = true;
-                return; // don't need to instrument
-            }
-
-            /* instrument this kernel */
-            instrument_function_if_needed(ctx, p->f);
-
-            nvbit_enable_instrumented(ctx, p->f, true);
-
-            /* reserve space */
-            int num_block = p->gridDimX * p->gridDimY * p->gridDimZ;
-            int num_thread = p->blockDimX * p->blockDimY * p->blockDimZ;
-            mem_val.empty();
-            mem_val.resize(num_block, std::vector<std::vector<uint32_t>>(num_thread));
-
-            recv_thread_receiving = true;
-        } else {
-            if (data_race_log.size() == 0) {
-                return; // don't need to instrument
-            }
-
-            /* make sure current kernel is completed */
-            cudaDeviceSynchronize();
-            assert(cudaGetLastError() == cudaSuccess);
-
-            /* make sure we prevent re-entry on the nvbit_callback when issuing
-             * the flush_channel kernel */
-            skip_flag = true;
-
-            /* issue flush of channel so we are sure all the memory accesses
-             * have been pushed */
-            flush_channel<<<1, 1>>>();
-            cudaDeviceSynchronize();
-            assert(cudaGetLastError() == cudaSuccess);
-
-            /* unset the skip flag */
-            skip_flag = false;
-
-            /* wait here until the receiving thread has not finished with the
-             * current kernel */
-            while (recv_thread_receiving) {
-                pthread_yield();
-            }
-
-            /* serilize vector */
-            char filename[40];
-            sprintf(filename, "kernel_log/vmem%d.bin", funcParams_count);
-            std::ofstream file;
-            file.open(filename);
-
-            if (file.fail()) {
-                std::cerr << strerror(errno) << "failed to open file.\n";
-                exit(1);
-            }
-
-            {
-                cereal::BinaryOutputArchive oarchive(file);
-
-                oarchive(mem_val);
-            }
-        }
     }
 }
  
 void nvbit_at_ctx_init(CUcontext ctx) {
     /* all log files will put into this directory */
     mkdir("kernel_log", 0777);
-
-    /* initialize channel */
-    recv_thread_started = true;
-    channel_host.init(0, CHANNEL_SIZE, &channel_dev, NULL);
-    pthread_create(&recv_thread, NULL, recv_thread_fun, NULL);
-
-    /* read data race log */
-    get_data_race_log();
-}
-
-void nvbit_at_ctx_term(CUcontext ctx) {
-    if (recv_thread_started) {
-        recv_thread_started = false;
-        pthread_join(recv_thread, NULL);
-    }
 }

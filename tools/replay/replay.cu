@@ -130,6 +130,28 @@ void *get_recorded_mem(size_t ByteCount, int is_input) {
     return buffer;
 }
 
+/* compare ptr with output in record phase */
+void compare_mem(const void *ptr, size_t ByteCount) {
+    void *to_compare = get_recorded_mem(ByteCount, 0);
+
+    int is_equal = memcmp(ptr, to_compare, ByteCount);
+
+    if (is_equal != 0) {
+        std::cerr << cudaMemcpy_output_count << "th output doesn't match!\n";
+
+        for (int i = 0; i < ByteCount; i += sizeof(float)) {
+            float A = ((const float *) ptr)[i/4];
+            float B = ((float *) to_compare)[i/4];
+            if ((A - B) >= 0.01 || (A - B) <= -0.01) {
+                std::cout << i << "th value doesn't match!";
+                std::cout << ((const float *) ptr)[i/4] << " vs " << ((float *) to_compare)[i/4] << std::endl;
+            }
+        }
+    }
+
+    free(to_compare);
+}
+
 /* compare hash value of ptr with output in record phase */
 void compare_mem_hash(const void *ptr, size_t ByteCount) {
     char filename[40]; // large enough for a counter
@@ -220,7 +242,9 @@ void replace_nonpointer_arguments(void **kernelParams) {
             // signed int
             int value;
             iss >> value;
-            *(((int **) kernelParams)[i]) = value;
+            if (*(((int **) kernelParams)[i]) != value) {
+                std::cerr << "error" << i <<std::endl;
+            }
         } else if (type == "unsigned" ||
                    type == "unsignedint") {
             // unsigned int
@@ -259,7 +283,9 @@ void replace_nonpointer_arguments(void **kernelParams) {
             // float
             int value;
             iss >> value;
-            *(((int **) kernelParams)[i]) = value;
+            if (*(((int **) kernelParams)[i]) != value) {
+                std::cerr << "error" << i <<std::endl;
+            }
         } else if (type == "double") {
             // double
             long long value;
@@ -446,58 +472,6 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
         /* dump output, so can compare it with the output in record phase */
         cuMemcpyDtoH_v2_params *p = (cuMemcpyDtoH_v2_params *)params;
 
-        compare_mem_hash(p->dstHost, p->ByteCount);
-    } else if (cbid == API_CUDA_cuMemcpyHtoD_v2)  {
-        cuMemcpyHtoD_v2_params *p = (cuMemcpyHtoD_v2_params *)params;
-
-        if (!is_exit) {
-            /* it is should be trigger at the begin of cuMemcpy
-             * so that the memory content can be replace 
-             * by the content in record phase */
-            recorded_mem = get_recorded_mem(p->ByteCount, 1);
-            origin_srcHost = p->srcHost;
-            p->srcHost = recorded_mem;
-        } else {
-            /* after cuMemcpy, free the memory allocated by get_recorded_mem */
-            p->srcHost = origin_srcHost;
-            free(recorded_mem);
-            recorded_mem = nullptr;
-            origin_srcHost = nullptr;
-        }
-    } else if ((cbid == API_CUDA_cuLaunchKernel_ptsz ||
-        cbid == API_CUDA_cuLaunchKernel)) {
-        cuLaunchKernel_params *p = (cuLaunchKernel_params *)params;
-        
-        if (!is_exit) {
-            replace_nonpointer_arguments(p->kernelParams);
-
-            if (data_race_log.size() == 0) {
-                return; // don't need to instrument
-            }
-
-            /* prevent re-entry on the nvbit_callback when call cudaMalloc */
-            skip_flag = true;
-            get_mem_val();
-            skip_flag = false;
-
-            /* instrument this kernel */
-            instrument_function_if_needed(ctx, p->f);
-
-            nvbit_enable_instrumented(ctx, p->f, true);
-        } else {
-            if (data_race_log.size() == 0) {
-                return; // don't need to instrument
-            }
-            
-            skip_flag = true;
-            cudaFree(d_mem_val);
-            cudaFree(d_mem_counter);
-            skip_flag = false;
-        }
+        compare_mem(p->dstHost, p->ByteCount);
     }
-}
-
-void nvbit_at_ctx_init(CUcontext ctx) {
-    /* read data race log */
-    get_data_race_log();
 }
