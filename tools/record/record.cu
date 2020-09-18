@@ -132,8 +132,8 @@ void get_data_race_log() {
     file.open("datarace.txt");
 
     if (file.fail()) {
-        std::cerr << strerror(errno) << "failed to open file.\n";
-        exit(1);
+        std::cout << "datarace.txt is not loaded." << std::endl;
+        return;
     }
 
     int func_id, inst_id;
