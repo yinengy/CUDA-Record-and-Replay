@@ -5,8 +5,8 @@ NVCC_VER=$(shell $(NVCC) --version | grep release | cut -f2 -d, | cut -f3 -d' ')
 NVCC_VER_CHECK=$(shell echo "${NVCC_VER} >= $(NVCC_VER_REQ)" | bc)
 
 NVBIT_PATH=../../nvbit_release/core
-CEREAL_PATH=/usr/local/cereal-1.3.0/include
-XXHASH_PATH=/usr/local/xxhash
+CEREAL_PATH=../../lib
+XXHASH_PATH=../../lib/xxhash
 
 INCLUDES=-I$(NVBIT_PATH) -I$(CEREAL_PATH) -I$(XXHASH_PATH)
 
