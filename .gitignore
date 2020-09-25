@@ -8,5 +8,6 @@
 *.so
 
 test-apps/*
-nvbit_release/*
+nvbit_release/test-apps/*
+nvbit_release/tools/*
 kernel_log/*
