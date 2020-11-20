@@ -32,71 +32,41 @@
 /* nvbit utility functions */
 #include "utils/utils.h"
 
+/* deserialize vector */
+#include <cereal/archives/binary.hpp>
+#include <cereal/types/vector.hpp>
+
 /* Set used to avoid re-instrumenting the same functions multiple times */
 std::unordered_set<CUfunction> already_instrumented;
 
-int *d_schedule_blockid;
-int *d_schedule_threadid;
-int *d_current_blockid;
+int *d_schedule;
 int *d_current_threadid;
-int *d_has_new_ticket;
 
 uint64_t *d_schedule_counter;
 
 void load_schedule() {
     std::ifstream file;
-    file.open("schedule.txt");
+    file.open("schedule.bin");
 
     if (file.fail()) {
-        std::cerr << "cannot open schedule.txt." << std::endl;
+        std::cerr << "cannot open schedule.bin" << std::endl;
         exit(1);
     }
 
-    std::vector<int> schedule_blockid;
-    std::vector<int> schedule_threadid;
+    cereal::BinaryInputArchive iarchive(file);
+    std::vector<int> schedule;
+    iarchive(schedule);
+    schedule.push_back(-1); // indicates the end of the array
 
-    int block_id, thread_id;
-    char comma;
-    std::string line;
-    while (std::getline(file, line)) {
-        if (line[0] != '#' || line[1] != '?' || line[2] != '#') {
-            continue;
-        }
-
-        /* format: block id, thread id */
-        std::istringstream iss(line.substr(3));
-        iss >> block_id;
-        iss >> comma;
-        iss >> thread_id;
-        
-
-        schedule_blockid.push_back(block_id);
-        schedule_threadid.push_back(thread_id);
-    }
-
-    // insert canary at the end to avoid index out of bound
-    schedule_blockid.push_back(-1);
-    schedule_threadid.push_back(-1);
-
-    cudaMalloc(&d_schedule_blockid, schedule_blockid.size() * sizeof(int));
-    cudaMemcpy(d_schedule_blockid, schedule_blockid.data(), schedule_blockid.size() * sizeof(int), cudaMemcpyHostToDevice);
-
-    cudaMalloc(&d_schedule_threadid, schedule_threadid.size() * sizeof(int));
-    cudaMemcpy(d_schedule_threadid, schedule_threadid.data(), schedule_threadid.size() * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMalloc(&d_schedule, schedule.size() * sizeof(int));
+    cudaMemcpy(d_schedule, schedule.data(), schedule.size() * sizeof(int), cudaMemcpyHostToDevice);
 
     cudaMalloc(&d_schedule_counter, sizeof(uint64_t));
     cudaMemset(d_schedule_counter, 0, sizeof(uint64_t));
 
     // first thread to schedule
-    cudaMalloc(&d_current_blockid, sizeof(int));
-    cudaMemcpy(d_current_blockid, schedule_blockid.data(), sizeof(int), cudaMemcpyHostToDevice);
-
     cudaMalloc(&d_current_threadid, sizeof(int));
-    cudaMemcpy(d_current_threadid, schedule_threadid.data(), sizeof(int), cudaMemcpyHostToDevice);
-
-    int val = 1;
-    cudaMalloc(&d_has_new_ticket, sizeof(int));
-    cudaMemcpy(d_has_new_ticket, &val, sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_current_threadid, schedule.data(), sizeof(int), cudaMemcpyHostToDevice);
 }
 
 void instrument_function_if_needed(CUcontext ctx, CUfunction func) {
@@ -125,18 +95,13 @@ void instrument_function_if_needed(CUcontext ctx, CUfunction func) {
                 nvbit_insert_call(instr, "acquire_lock", IPOINT_BEFORE);
                 /* predicate value */
                 nvbit_add_call_arg_pred_val(instr);
-                nvbit_add_call_arg_const_val64(instr, (uint64_t) d_has_new_ticket);
-                nvbit_add_call_arg_const_val64(instr, (uint64_t) d_current_blockid);
                 nvbit_add_call_arg_const_val64(instr, (uint64_t) d_current_threadid);
 
                 nvbit_insert_call(instr, "release_lock", IPOINT_AFTER);
                 /* predicate value */
                 nvbit_add_call_arg_pred_val(instr);
-                nvbit_add_call_arg_const_val64(instr, (uint64_t) d_has_new_ticket);
                 nvbit_add_call_arg_const_val64(instr, (uint64_t) d_schedule_counter);
-                nvbit_add_call_arg_const_val64(instr, (uint64_t) d_schedule_blockid);
-                nvbit_add_call_arg_const_val64(instr, (uint64_t) d_schedule_threadid);
-                nvbit_add_call_arg_const_val64(instr, (uint64_t) d_current_blockid);
+                nvbit_add_call_arg_const_val64(instr, (uint64_t) d_schedule);
                 nvbit_add_call_arg_const_val64(instr, (uint64_t) d_current_threadid);
             }
         }
@@ -156,11 +121,8 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
 
             nvbit_enable_instrumented(ctx, p->f, true);
         } else {
-            cudaFree(d_schedule_blockid);
-            cudaFree(d_schedule_threadid);
-            cudaFree(d_current_blockid);
+            cudaFree(d_schedule);
             cudaFree(d_current_threadid);
-            cudaFree(d_has_new_ticket);
             cudaFree(d_schedule_counter);
         }
     }
