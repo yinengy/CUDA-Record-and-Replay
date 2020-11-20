@@ -12,9 +12,13 @@
 /* mutex */
 #include "concurrency.cpp"
 
+/* channel for getting message from device */
+#include "utils/channel.hpp"
+
+
 extern "C" __device__ __noinline__ void acquire_lock(int32_t pred,
-                                                       uint64_t m_ptr
-                                                       ) {
+                                                     uint64_t m_ptr,
+                                                     uint64_t pchannel_dev) {
     if (!pred) {
         return;
     }
@@ -26,10 +30,12 @@ extern "C" __device__ __noinline__ void acquire_lock(int32_t pred,
     int block_id = blockIdx.x + blockIdx.y * gridDim.x +
                    gridDim.x * gridDim.y * blockIdx.z;
 
-    int l_thread_id = (threadIdx.z * (blockDim.x * blockDim.y)) +
-                      (threadIdx.y * blockDim.x) + threadIdx.x;
+    int thread_id = block_id * (blockDim.x * blockDim.y * blockDim.z)
+                    + (threadIdx.z * (blockDim.x * blockDim.y))
+                    + (threadIdx.y * blockDim.x) + threadIdx.x;
 
-    printf("#?#%d,%d\n", block_id, l_thread_id);
+    ChannelDev *channel_dev = (ChannelDev *)pchannel_dev;
+    channel_dev->push(&thread_id, sizeof(int));
 }
 
 extern "C" __device__ __noinline__ void release_lock(int32_t pred,
