@@ -113,20 +113,14 @@ struct null_mutex {
     _ABI void unlock() noexcept { }
 };
 
-struct mutex {
-    _ABI void lock() noexcept {
-        while (1 == l.exchange(1, cuda::std::memory_order_acquire))
-#ifndef __NO_WAIT
-            l.wait(1, cuda::std::memory_order_relaxed)
-#endif
-            ;
+struct sem_mutex {
+    void lock() noexcept {
+        c.acquire();
     }
-    _ABI void unlock() noexcept {
-        l.store(0, cuda::std::memory_order_release);
-#ifndef __NO_WAIT
-        l.notify_one();
-#endif
+    void unlock() noexcept {
+        c.release();
     }
-    alignas(64) cuda::atomic<int, cuda::thread_scope_device> l = ATOMIC_VAR_INIT(0);
+    sem_mutex() : c(1) { }
+    cuda::binary_semaphore<cuda::thread_scope_device> c;
 };
 #endif

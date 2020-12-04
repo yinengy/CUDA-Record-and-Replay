@@ -26,6 +26,7 @@ extern "C" __device__ __noinline__ void acquire_lock(int32_t pred,
     mutex* m = (mutex *) m_ptr;
 
     m->lock();
+    printf("pred: %d\n", pred);
 
     int block_id = blockIdx.x + blockIdx.y * gridDim.x +
                    gridDim.x * gridDim.y * blockIdx.z;
@@ -34,18 +35,19 @@ extern "C" __device__ __noinline__ void acquire_lock(int32_t pred,
                     + (threadIdx.z * (blockDim.x * blockDim.y))
                     + (threadIdx.y * blockDim.x) + threadIdx.x;
 
-    ChannelDev *channel_dev = (ChannelDev *)pchannel_dev;
-    channel_dev->push(&thread_id, sizeof(int));
+    printf("%d\n", thread_id);
 }
 
 extern "C" __device__ __noinline__ void release_lock(int32_t pred,
                                                        uint64_t m_ptr
                                                        ) {
+    printf("pred: %d", pred);
     if (!pred) {
         return;
     }
 
     mutex* m = (mutex *) m_ptr;
 
+    printf("unlock!\n");
     m->unlock();
 }
