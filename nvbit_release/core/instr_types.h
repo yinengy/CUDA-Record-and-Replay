@@ -54,8 +54,6 @@ enum class MemorySpace {
     SHARED,            // shared memory operation
     CONSTANT,          // constant memory operation
     GLOBAL_TO_SHARED,  // read from global memory then write to shared memory
-    SURFACE,   // surface memory operation
-    TEXTURE,   // texture memory operation
 };
 constexpr const char* MemorySpaceStr[] = {
     "NONE", "LOCAL", "GENERIC", "GLOBAL", "SHARED", "CONSTANT",

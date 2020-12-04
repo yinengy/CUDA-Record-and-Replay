@@ -41,7 +41,7 @@
 #include "cuda.h"
 #include "generated_cuda_meta.h"
 
-#define NVBIT_VERSION "1.5.2"
+#define NVBIT_VERSION "1.5"
 
 /* Instruction class returned by the NVBit inspection API nvbit_get_instrs */
 class Instr {
