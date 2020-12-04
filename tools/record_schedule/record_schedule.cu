@@ -130,14 +130,14 @@ void instrument_function_if_needed(CUcontext ctx, CUfunction func) {
             if (opcode == "LDG" || opcode == "STG") {
                 nvbit_insert_call(instr, "acquire_lock", IPOINT_BEFORE);
                 /* predicate value */
-                nvbit_add_call_arg_pred_val(instr);
+                nvbit_add_call_arg_guard_pred_val(instr);
                 nvbit_add_call_arg_const_val64(instr, (uint64_t) mtx);
                 /* add pointer to channel_dev*/
                 nvbit_add_call_arg_const_val64(instr, (uint64_t) &channel_dev);
 
                 nvbit_insert_call(instr, "release_lock", IPOINT_AFTER);
                 /* predicate value */
-                nvbit_add_call_arg_pred_val(instr);
+                nvbit_add_call_arg_guard_pred_val(instr);
                 nvbit_add_call_arg_const_val64(instr, (uint64_t) mtx);
             }
         }

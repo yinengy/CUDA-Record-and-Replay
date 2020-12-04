@@ -29,131 +29,23 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <cassert>
+#include <iomanip>  // std::setw
+#include <iostream>
 #include <string>
 #include <vector>
-#include <iostream>
-#include <iomanip>  // std::setw
+
+#include "instr_types.h"
 
 #include "tools_cuda_api_meta.h"
 #define __CUDA_API_VERSION_INTERNAL
 #include "cuda.h"
 #include "generated_cuda_meta.h"
 
-#define NVBIT_VERSION "1.4"
+#define NVBIT_VERSION "1.5.2"
 
 /* Instruction class returned by the NVBit inspection API nvbit_get_instrs */
 class Instr {
   public:
-    /* all supported arch have at most 255 general purpose registers */
-    static constexpr const int RZ = 255;
-    /* the always true predicate is indicated as "7" on all the archs */
-    static constexpr const int PT = 7;
-    /* the entire predicate register is ecoded as "8" */
-    static constexpr const int PR = 8;
-    static constexpr const int URZ = 63;
-    static constexpr const int UPT = 7;  // uniform predicate true
-    static constexpr const int UPR = 8;  // entire uniform predicate register
-    static constexpr const int MAX_CHARS = 256;
-
-    enum class memOpType {
-        NONE,
-        LOCAL,     // local memory operation
-        GENERIC,   // generic memory operation
-        GLOBAL,    // global memory operation
-        SHARED,    // shared memory operation
-        CONSTANT,  // constant memory operation
-        GLOBAL_TO_SHARED, // read from global memory then write to shared memory
-    };
-    static constexpr const char* memOpTypeStr[] = {
-        "NONE", "LOCAL", "GENERIC", "GLOBAL", "SHARED", "CONSTANT",
-        "GLOBAL_TO_SHARED"};
-
-    enum class operandType {
-        IMM_UINT64,
-        IMM_DOUBLE,
-        REG,
-        PRED,
-        UREG,
-        UPRED,
-        CBANK,
-        MREF,
-        GENERIC
-    };
-
-    static constexpr const char* operandTypeStr[] = {
-        "IMM_UINT64", "IMM_DOUBLE", "REG",  "PRED",   "UREG",
-        "UPRED",      "CBANK",      "MREF", "GENERIC"};
-
-    enum class regModifierType {
-        /* stride modifiers */
-        X1,
-        X4,
-        X8,
-        X16,
-        /* size modifiers */
-        U32,
-        U64,
-        NO_MOD
-    };
-    static constexpr const char* regModifierTypeStr[] = {
-        "X1", "X4", "X8", "X16", "U32", /* no U */ "64", "NO_MOD"};
-
-    typedef struct { int imm; } mref_t;
-
-    typedef struct {
-        /* operand type */
-        operandType type;
-        /* is negative */
-        bool is_neg;
-        /* is not */
-        bool is_not;
-        /* is absolute */
-        bool is_abs;
-
-        union {
-            struct {
-                uint64_t value;
-            } imm_uint64;
-
-            struct {
-                double value;
-            } imm_double;
-
-            struct {
-                int num;
-                /* register properties .XXX */
-                char prop[MAX_CHARS];
-            } reg;
-
-            struct {
-                int num;
-            } pred;
-
-            struct {
-                int id;
-                bool has_imm_offset;
-                int imm_offset;
-                bool has_reg_offset;
-                int reg_offset;
-            } cbank;
-
-            struct {
-                bool has_ra;
-                int ra_num;
-                regModifierType ra_mod;
-                bool has_ur;
-                int ur_num;
-                bool has_imm;
-                int imm;
-            } mref;
-
-            struct {
-                char array[MAX_CHARS];
-            } generic;
-
-        } u;
-    } operand_t;
-
     /* returns the "string"  containing the SASS, i.e. IMAD.WIDE R8, R8, R9 */
     const char* getSass();
     /* returns offset in bytes of this instruction within the function */
@@ -175,17 +67,18 @@ class Instr {
     /* returns short opcode of the instruction (i.e. IMAD.WIDE returns IMAD) */
     const char* getOpcodeShort();
 
-    /* returns memOpType_t */
-    memOpType getMemOpType();
+    /* returns MemorySpace type (was getMemOpType) */
+    InstrType::MemorySpace getMemorySpace();
     bool isLoad();
     bool isStore();
     bool isExtended();
     int getSize();
 
+
     /* get number of operands */
     int getNumOperands();
     /* get specific operand */
-    const operand_t* getOperand(int num_operand);
+    const InstrType::operand_t* getOperand(int num_operand);
 
     /* print fully decoded instruction */
     void printDecoded();
@@ -194,7 +87,7 @@ class Instr {
 
   private:
     /* Constructor used internally by NVBit */
-    Instr();
+    Instr(const char* sass);
     /* Reserved variable used internally by NVBit */
     const void* reserved;
     friend class Nvbit;
@@ -334,15 +227,30 @@ typedef enum { IPOINT_BEFORE, IPOINT_AFTER } ipoint_t;
 void nvbit_insert_call(const Instr* instr, const char* dev_func_name,
                        ipoint_t point);
 
-/* Add int32_t argument to last injected call, value of the predicate for this
- * instruction */
-void nvbit_add_call_arg_pred_val(const Instr* instr,
-                                 bool is_variadic_arg = false);
+/* Add int32_t argument to last injected call, value of the (uniform) predicate
+ * for this instruction */
+void nvbit_add_call_arg_guard_pred_val(const Instr* instr,
+                                       bool is_variadic_arg = false);
+
+/* Add int32_t argument to last injected call, value of the designated predicate
+ * for this instruction */
+void nvbit_add_call_arg_pred_val_at(const Instr* instr, int pred_num,
+                                    bool is_variadic_arg = false);
+
+/* Add int32_t argument to last injected call, value of the designated uniform
+ * predicate for this instruction */
+void nvbit_add_call_arg_upred_val_at(const Instr* instr, int upred_num,
+                                     bool is_variadic_arg = false);
 
 /* Add int32_t argument to last injected call, value of the entire predicate
  * register for this thread */
 void nvbit_add_call_arg_pred_reg(const Instr* instr,
                                  bool is_variadic_arg = false);
+
+/* Add int32_t argument to last injected call, value of the entire uniform
+ * predicate register for this thread */
+void nvbit_add_call_arg_upred_reg(const Instr* instr,
+                                  bool is_variadic_arg = false);
 
 /* Add uint32_t argument to last injected call, constant 32-bit value */
 void nvbit_add_call_arg_const_val32(const Instr* instr, uint32_t val,
@@ -397,7 +305,8 @@ void nvbit_remove_orig(const Instr* instr);
 __device__ __noinline__ int32_t nvbit_read_reg(uint64_t reg_num);
 __device__ __noinline__ void nvbit_write_reg(uint64_t reg_num, int32_t reg_val);
 __device__ __noinline__ int32_t nvbit_read_ureg(uint64_t reg_num);
-__device__ __noinline__ void nvbit_write_ureg(uint64_t reg_num, int32_t reg_val);
+__device__ __noinline__ void nvbit_write_ureg(uint64_t reg_num,
+                                              int32_t reg_val);
 __device__ __noinline__ int32_t nvbit_read_pred_reg(void);
 __device__ __noinline__ void nvbit_write_pred_reg(int32_t reg_val);
 __device__ __noinline__ int32_t nvbit_read_upred_reg(void);

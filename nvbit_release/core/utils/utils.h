@@ -117,41 +117,6 @@ __device__ __forceinline__ void csleep(uint64_t clock_count) {
     }
 }
 
-__device__ __forceinline__ int ballot(int predicate) {
-#if __CUDACC_VER_MAJOR__ <= 8
-    return __ballot(predicate);
-#else
-    return __ballot_sync(__activemask(), predicate);
-#endif
-}
-
-template <typename T>
-__device__ __forceinline__ T shfl(T val, int fromwhom) {
-#if __CUDACC_VER_MAJOR__ <= 8
-    return __shfl(val, fromwhom);
-#else
-    return __shfl_sync(__activemask(), val, fromwhom);
-#endif
-}
-
-
-// Warp level broadcast function
-template <typename T>
-__device__ T __broadcast(T t, int fromWhom) {
-    union {
-        int32_t shflVals[sizeof(T)];
-        T t;
-    } p;
-
-    p.t = t;
-#pragma unroll
-    for (int i = 0; i < sizeof(T); i++) {
-        int32_t val = (int32_t)p.shflVals[i];
-        p.shflVals[i] = shfl(val, fromWhom);
-    }
-    return p.t;
-}
-
 class Managed {
   public:
     void *operator new(size_t len) {
