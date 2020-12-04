@@ -127,7 +127,7 @@ void instrument_function_if_needed(CUcontext ctx, CUfunction func) {
         for (auto instr : instrs) {
             std::string opcode = instr->getOpcodeShort();
 
-            if (opcode == "LDG" || opcode == "STG") {
+            if (opcode == "LDG" || opcode == "STG" || opcode == "RED" || opcode == "ATOM" || opcode == "ATOMS") {
                 nvbit_insert_call(instr, "acquire_lock", IPOINT_BEFORE);
                 /* predicate value */
                 nvbit_add_call_arg_pred_val(instr);
